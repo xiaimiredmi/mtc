@@ -152,16 +152,15 @@ if ($Base.StartsWith('https://')) {
     } catch {
         Fail 'https' $_.Exception.Message
     }
-    try {
-        $plain = Invoke-WebRequest ($Base -replace '^https://', 'http://') -UseBasicParsing -MaximumRedirection 0 -TimeoutSec 25
-        Info 'http did not redirect' ("HTTP " + $plain.StatusCode)
-    } catch {
-        $code = $_.Exception.Response.StatusCode.value__
-        if ($code -ge 300 -and $code -lt 400) {
-            Pass 'http redirects to https' "$code"
-        } else {
-            Info 'http redirect' "status $code"
-        }
+    # curl, not Invoke-WebRequest: with -MaximumRedirection 0 the .NET client throws
+    # instead of handing back the 301, which made a working redirect look broken.
+    $probe = curl.exe -sS -o NUL --max-time 25 -w '%{http_code} %{redirect_url}' ($Base -replace '^https://', 'http://') 2>$null
+    $parts = $probe -split ' ', 2
+    $code = [int]$parts[0]
+    if ($code -ge 300 -and $code -lt 400) {
+        Pass 'http redirects to https' ($probe.Trim())
+    } else {
+        Fail 'http does not redirect' ($probe.Trim())
     }
 }
 
