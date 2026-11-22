@@ -6,6 +6,30 @@ All notable changes to this project. Format based on
 
 ---
 
+## [1.5.0] — 2026-11-22
+
+### 新增
+
+* **`installer\MtcSetup.exe`** —— 2.8 MB 的 Windows 安装程序：命令行三个程序、查看器、
+  `.mtc` 文件关联、用户 PATH、开始菜单快捷方式、"应用和功能"里的卸载项，全在一次点击里。
+  按用户安装（`%LOCALAPPDATA%\Programs\MTC` + `HKCU`），不需要管理员权限。
+* 静默安装与静默卸载：`/S`、`/dir <path>`、`/nopath`、`/noassoc`、`/nostartmenu`、
+  `/extract <dir>`、`/uninstall`。卸载不带参数也行，安装位置从注册表读回。
+
+### 实现
+
+* 用 .NET Framework 自带的 `csc.exe` 编译，不引入 Inno Setup / WiX / NSIS；二进制以
+  **逐文件 deflate 资源** 嵌入（`DeflateStream` 在 `System.dll` 里，而 `ZipArchive`
+  需要的程序集 `csc` 按简单名不一定解析得到）。
+* 卸载用"退出后由批处理删除目录"的方式自删除——Windows 不允许删除正在运行的镜像，
+  而这个卸载器本身就是被删文件之一。
+
+### 修掉的两个坑
+
+* `uninstall.exe` 原先只认 `/uninstall` 参数，于是"应用和功能"里点卸载（最多带个 `/S`）
+  会变成**重新安装**；而且文件名判断在参数解析**之后**，解析时仍按默认目录处理，
+  结果注册表清理了、真正的安装目录却留着。现在文件名就是意图，且在解析之前判定。
+* 卸载器只有在目标目录里找到 `mtview.exe` 时才删文件，避免路径写错时带走别的目录。
 ## [1.4.0] — 2026-11-17
 
 ### Added
@@ -302,6 +326,30 @@ All notable changes to this project. Format based on
 
 # 中文
 
+## [1.5.0] — 2026-11-22
+
+### 新增
+
+* **`installer\MtcSetup.exe`** —— 2.8 MB 的 Windows 安装程序：命令行三个程序、查看器、
+  `.mtc` 文件关联、用户 PATH、开始菜单快捷方式、"应用和功能"里的卸载项，全在一次点击里。
+  按用户安装（`%LOCALAPPDATA%\Programs\MTC` + `HKCU`），不需要管理员权限。
+* 静默安装与静默卸载：`/S`、`/dir <path>`、`/nopath`、`/noassoc`、`/nostartmenu`、
+  `/extract <dir>`、`/uninstall`。卸载不带参数也行，安装位置从注册表读回。
+
+### 实现
+
+* 用 .NET Framework 自带的 `csc.exe` 编译，不引入 Inno Setup / WiX / NSIS；二进制以
+  **逐文件 deflate 资源** 嵌入（`DeflateStream` 在 `System.dll` 里，而 `ZipArchive`
+  需要的程序集 `csc` 按简单名不一定解析得到）。
+* 卸载用"退出后由批处理删除目录"的方式自删除——Windows 不允许删除正在运行的镜像，
+  而这个卸载器本身就是被删文件之一。
+
+### 修掉的两个坑
+
+* `uninstall.exe` 原先只认 `/uninstall` 参数，于是"应用和功能"里点卸载（最多带个 `/S`）
+  会变成**重新安装**；而且文件名判断在参数解析**之后**，解析时仍按默认目录处理，
+  结果注册表清理了、真正的安装目录却留着。现在文件名就是意图，且在解析之前判定。
+* 卸载器只有在目标目录里找到 `mtview.exe` 时才删文件，避免路径写错时带走别的目录。
 ## [1.4.0] — 2026-11-17
 
 ### 新增
