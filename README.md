@@ -77,6 +77,23 @@ mtcodec encode photo.jpg photo.mtc -q 90 -s 444
 
 The numbers, the bench tool and the comparison script live in `rust/`.
 
+## Install on Windows
+
+`installer\MtcSetup.exe` is a single 2.8 MB setup: the three binaries, a `.mtc` file
+association, the folder on `PATH`, start menu shortcuts and an Add/Remove Programs
+entry. Per-user, so no administrator prompt.
+
+```powershell
+installer\MtcSetup.exe                             # wizard
+installer\MtcSetup.exe /S                          # silent, defaults
+installer\MtcSetup.exe /S /dir "D:\Tools\MTC"       # silent, chosen folder
+installer\MtcSetup.exe /uninstall                   # remove everything again
+```
+
+It is built by `installer\build.ps1` with the C# compiler that ships with .NET
+Framework — no Inno Setup, no WiX, no NSIS, and no dependency for the person
+running it either. See [installer/README.md](installer/README.md).
+
 ## The site
 
 `site/` is one page that is also a working encoder (published at `mtc-xiaimiredmi.*`
@@ -107,6 +124,7 @@ rust/src/arith.rs      binary arithmetic coder
 rust/src/transform.rs  DCT matrix, zig-zag scan, quantiser table
 rust/src/bin/          mtbench (measurements) and mtview (egui viewer)
 deploy/register.ps1    file association and PATH, per user
+installer/             the Windows setup (MtcSetup.cs, build.ps1, the .exe)
 site/                  the WebAssembly demo page (index.html, codec.js, mtc.wasm)
 wasm/                  the thin cdylib that exposes the codec to JavaScript
 android/               camera + gallery app, no Gradle

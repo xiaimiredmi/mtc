@@ -8,6 +8,11 @@ rust/bench/data/
 # --- WebAssembly ---
 wasm/target/
 
+# --- Windows installer ---
+installer/payload/
+installer/MtcPayload.zip
+installer/csc.log
+
 # --- Android ---
 # the .so files come out of cargo-ndk during every build
 android/app/src/main/jniLibs/

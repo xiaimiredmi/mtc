@@ -1,0 +1,47 @@
+name: installer
+
+# Builds installer\MtcSetup.exe on a clean Windows runner and attaches it, so a
+# release does not depend on one machine having the right binaries lying around.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "installer/**"
+      - "rust/src/**"
+      - "rust/Cargo.toml"
+      - ".github/workflows/installer.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: build the binaries
+        working-directory: rust
+        run: cargo build --release --features viewer --bins
+
+      - name: stage them where the installer script expects them
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force bin | Out-Null
+          Copy-Item rust\target\release\mtcodec.exe bin\
+          Copy-Item rust\target\release\mtbench.exe bin\
+          Copy-Item rust\target\release\mtview.exe bin\
+
+      - name: build the installer
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File installer\build.ps1 -Check
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MtcSetup
+          path: installer/MtcSetup.exe
+          if-no-files-found: error
