@@ -16,6 +16,13 @@ All notable changes to this project. Format based on
 * 静默安装与静默卸载：`/S`、`/dir <path>`、`/nopath`、`/noassoc`、`/nostartmenu`、
   `/extract <dir>`、`/uninstall`。卸载不带参数也行，安装位置从注册表读回。
 
+### 网站
+
+* 明暗两套主题，默认跟随系统，点顶栏 ☾/☀ 切换后记住选择（`localStorage`）。
+* 下载按钮按 `navigator.userAgent` 认系统：Windows 直接给 `MtcSetup.exe`，
+  Android 直接给 APK，其它系统去 GitHub 发布页——不会出现"点了没反应"的死链。
+* 新增 GitHub Release `v1.5.0`，附 `MtcSetup.exe` 与 `mtc-camera.apk`。
+
 ### 实现
 
 * 用 .NET Framework 自带的 `csc.exe` 编译，不引入 Inno Setup / WiX / NSIS；二进制以
@@ -335,6 +342,13 @@ All notable changes to this project. Format based on
   按用户安装（`%LOCALAPPDATA%\Programs\MTC` + `HKCU`），不需要管理员权限。
 * 静默安装与静默卸载：`/S`、`/dir <path>`、`/nopath`、`/noassoc`、`/nostartmenu`、
   `/extract <dir>`、`/uninstall`。卸载不带参数也行，安装位置从注册表读回。
+
+### 网站
+
+* 明暗两套主题，默认跟随系统，点顶栏 ☾/☀ 切换后记住选择（`localStorage`）。
+* 下载按钮按 `navigator.userAgent` 认系统：Windows 直接给 `MtcSetup.exe`，
+  Android 直接给 APK，其它系统去 GitHub 发布页——不会出现"点了没反应"的死链。
+* 新增 GitHub Release `v1.5.0`，附 `MtcSetup.exe` 与 `mtc-camera.apk`。
 
 ### 实现
 

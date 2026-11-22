@@ -25,6 +25,7 @@
     <a href="#numbers">数据</a>
     <a href="#android">安卓</a>
     <a class="ghost" href="#download">下载</a>
+    <button class="theme" id="theme" type="button" aria-label="切换明暗主题" title="明暗切换">☾</button>
   </nav>
 </header>
 
@@ -43,6 +44,7 @@
     </p>
     <div class="cta reveal">
       <a class="btn primary" href="#demo">立刻压一张图</a>
+      <a class="btn" id="heroDl" href="https://github.com/xiaimiredmi/mtc/releases/latest">下载</a>
       <a class="btn" href="https://github.com/xiaimiredmi/mtc" target="_blank" rel="noreferrer">看源代码</a>
     </div>
     <ul class="strip reveal" id="strip">
@@ -196,11 +198,19 @@
   <!-- ───────────────────────────── download ───────────────────────────── -->
   <section id="download" class="panel center">
     <h2 class="reveal">拿走它</h2>
-    <p class="lede center reveal">格式文档、基准数据、安卓包，都在同一个仓库里。</p>
-    <div class="cta reveal">
-      <a class="btn primary" href="https://github.com/xiaimiredmi/mtc" target="_blank" rel="noreferrer">GitHub</a>
-      <a class="btn" href="https://github.com/xiaimiredmi/mtc/tree/main/android" target="_blank" rel="noreferrer">安卓 APK（783 KB）</a>
-      <a class="btn" href="https://github.com/xiaimiredmi/mtc/blob/main/docs/FORMAT.md" target="_blank" rel="noreferrer">格式规范</a>
+    <p class="lede center reveal">页面会先认一下你用的系统，把合适的那个直接递给你。</p>
+
+    <div class="downloadCard reveal">
+      <div class="row">
+        <a class="btn primary" id="dlMain" href="https://github.com/xiaimiredmi/mtc/releases/latest">下载</a>
+        <a class="btn" id="dlAlt" href="https://github.com/xiaimiredmi/mtc/releases/latest">全部版本</a>
+      </div>
+      <p class="osNote" id="osNote">正在识别系统…</p>
+      <div class="altLinks">
+        <a href="https://github.com/xiaimiredmi/mtc/releases">Releases</a>
+        <a href="https://github.com/xiaimiredmi/mtc" target="_blank" rel="noreferrer">源代码</a>
+        <a href="https://github.com/xiaimiredmi/mtc/blob/main/docs/FORMAT.md" target="_blank" rel="noreferrer">格式规范</a>
+      </div>
     </div>
   </section>
 </main>

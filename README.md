@@ -105,6 +105,11 @@ on the page are produced by the same Rust code the command line uses.
 powershell -ExecutionPolicy Bypass -File site\build.ps1 -Serve   # http://127.0.0.1:8765
 ```
 
+Light and dark themes, remembered per visitor, and a download button that reads the
+user agent: on Windows it goes straight to `MtcSetup.exe` in the latest release, on
+Android to the APK, and on anything else to the releases page rather than a dead
+link.
+
 For the bundled sample at q85 the page reports 34 304 bytes / 32.57 dB; the
 command line reports the same two numbers for the same file. `.github/workflows/site.yml`
 publishes `site/` to GitHub Pages once Pages is switched to "GitHub Actions" in

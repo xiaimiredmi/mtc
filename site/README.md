@@ -24,6 +24,31 @@ powershell -ExecutionPolicy Bypass -File site\build.ps1 -Serve   # + http://127.
 `build.ps1` needs `rustup target add wasm32-unknown-unknown` once. There is no
 `node`, no bundler and no `package.json`: the page is three files and a `.wasm`.
 
+## Light and dark
+
+Light is the default; dark follows the operating system until the visitor clicks the
+switch in the navigation bar, after which their choice is remembered in
+`localStorage` and the system is ignored. Every colour is a custom property, so the
+two palettes are one block each in `styles.css` — nothing else mentions a colour.
+
+`?theme=light` / `?theme=dark` force one, which is how the headless check screenshots
+both without pretending to click.
+
+## The download button picks a target
+
+`#dlMain` (and the hero button) point at whatever this machine can actually run,
+decided from the user agent in `detectOS()`:
+
+| Detected | Goes to |
+| --- | --- |
+| Windows | `releases/latest/download/MtcSetup.exe` (2.8 MB installer) |
+| Android | `releases/latest/download/mtc-camera.apk` |
+| macOS / iOS / Linux / anything else | the releases page, because the project does not build for it |
+
+The note under the button says which system it recognised, so a wrong guess is
+visible rather than mysterious. `?os=windows` / `?os=linux` force a target for the
+headless check.
+
 ## What the demo actually proves
 
 The page is not a mock-up with precomputed numbers. Drag in a photo and it:

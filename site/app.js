@@ -8,6 +8,147 @@ const params = new URLSearchParams(location.search);
 // `?auto` is the headless check: skip the reveal animations and counters so a
 // screenshot shows the finished state instead of a frame mid-transition.
 if (params.has("auto")) document.body.classList.add("auto");
+
+// ────────────────────────────── theme ─────────────────────────────────
+// Light is the default; dark follows the system until the visitor clicks the
+// switch, after which their choice is remembered and the system is ignored.
+const THEME_KEY = "mtc-theme";
+
+function systemTheme() {
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function applyTheme(theme, remember) {
+  document.documentElement.dataset.theme = theme;
+  const button = $("theme");
+  if (button) {
+    button.textContent = theme === "dark" ? "☀" : "☾";
+    button.title = theme === "dark" ? "切换到白天" : "切换到黑夜";
+    button.setAttribute("aria-label", button.title);
+  }
+  if (remember) {
+    try { localStorage.setItem(THEME_KEY, theme); } catch (e) { /* private mode */ }
+  }
+}
+
+function initialTheme() {
+  const forced = params.get("theme");        // ?theme=light — used for screenshots
+  if (forced === "light" || forced === "dark") return forced;
+  try {
+    const stored = localStorage.getItem(THEME_KEY);
+    if (stored === "light" || stored === "dark") return stored;
+  } catch (e) { /* private mode */ }
+  return systemTheme();
+}
+
+applyTheme(initialTheme(), false);
+
+if ($("theme")) {
+  $("theme").addEventListener("click", () => {
+    applyTheme(currentThemeName() === "dark" ? "light" : "dark", true);
+  });
+}
+
+function currentThemeName() {
+  return document.documentElement.dataset.theme || systemTheme();
+}
+
+// Only follow the system while the visitor has not decided for themselves.
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  let chosen = null;
+  try { chosen = localStorage.getItem(THEME_KEY); } catch (e) { }
+  if (chosen !== "light" && chosen !== "dark") applyTheme(systemTheme(), false);
+});
+
+// ───────────────────────── download target by OS ───────────────────────
+// One button, pointed at whatever this machine can actually run. Anything the
+// project does not build for goes to the releases page rather than a dead asset.
+const RELEASES = "https://github.com/xiaimiredmi/mtc/releases";
+const LATEST = RELEASES + "/latest";
+const ASSET = LATEST + "/download/";
+
+function detectOS() {
+  const ua = navigator.userAgent;
+  const platform = (navigator.userAgentData && navigator.userAgentData.platform)
+    || navigator.platform || "";
+  if (/Windows NT/i.test(ua) || /Win(32|64)/i.test(platform)) return "windows";
+  if (/Android/i.test(ua)) return "android";
+  if (/iPhone|iPad|iPod/i.test(ua)) return "ios";
+  if (/Mac/i.test(platform) || /Mac OS X/i.test(ua)) return "mac";
+  if (/Linux|X11/i.test(platform) || /Linux/i.test(ua)) return "linux";
+  return "other";
+}
+
+const DOWNLOADS = {
+  windows: {
+    href: ASSET + "MtcSetup.exe",
+    label: "下载 Windows 安装程序",
+    short: "下载安装程序",
+    note: "检测到 <b>Windows</b>：直接下载 <b>MtcSetup.exe</b>（2.8 MB），双击安装，含命令行、查看器和 .mtc 关联。",
+  },
+  android: {
+    href: ASSET + "mtc-camera.apk",
+    label: "下载 Android 相机",
+    short: "下载 APK",
+    note: "检测到 <b>Android</b>：直接下载 <b>mtc-camera.apk</b>（0.8 MB），相机直出 .mtc，另有相册与查看器。",
+  },
+  mac: {
+    href: LATEST,
+    label: "在 GitHub 上选择版本",
+    short: "去 GitHub",
+    note: "检测到 <b>macOS</b>：这个项目目前只发布 Windows 和 Android 版本，所以带你去 GitHub 发布页。",
+  },
+  ios: {
+    href: LATEST,
+    label: "在 GitHub 上选择版本",
+    short: "去 GitHub",
+    note: "检测到 <b>iPhone / iPad</b>：没有 iOS 版本，已在 GitHub 发布页。",
+  },
+  linux: {
+    href: LATEST,
+    label: "在 GitHub 上选择版本",
+    short: "去 GitHub",
+    note: "检测到 <b>Linux</b>：没有打包好的 Linux 版本，但可以从源码构建（见发布页）。",
+  },
+  other: {
+    href: LATEST,
+    label: "在 GitHub 上选择版本",
+    short: "去 GitHub",
+    note: "没认出这个系统，带你去 GitHub 发布页自己挑。",
+  },
+};
+
+function applyDownload() {
+  const kind = params.get("os") || detectOS();   // ?os=linux — used for screenshots
+  const target = DOWNLOADS[kind] || DOWNLOADS.other;
+  for (const id of ["dlMain", "heroDl"]) {
+    const link = $(id);
+    if (!link) continue;
+    link.href = target.href;
+    link.textContent = id === "heroDl" ? target.short : target.label;
+    if (kind === "windows" || kind === "android") {
+      link.setAttribute("download", "");
+    }
+  }
+  const alt = $("dlAlt");
+  if (alt) alt.href = LATEST;
+  const note = $("osNote");
+  if (note) note.innerHTML = target.note;
+}
+
+applyDownload();
+
+// `?scroll=download` is for the headless check: it brings a section to the top so
+// a 900 px screenshot contains the thing being checked.
+if (params.has("auto") && params.get("scroll")) {
+  // Smooth scrolling plus a screenshot is a race: the frame gets captured mid
+  // repaint and shows a half-drawn page. Jump, after the first paint.
+  document.documentElement.style.scrollBehavior = "auto";
+  const target = document.getElementById(params.get("scroll"));
+  if (target) {
+    setTimeout(() => target.scrollIntoView({ block: "start", behavior: "instant" }), 500);
+  }
+}
 const MAX_DEMO_SIDE = 1280; // the browser demo works on a sane size
 
 const state = {
