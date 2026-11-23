@@ -5,6 +5,11 @@
 //! Esc to close. `.mtc` files are decoded by this crate; PNG/JPEG/WebP/BMP open
 //! through the same `image` crate the codec uses.
 //!
+//! A release build is a GUI binary: without this, double-clicking a `.mtc` opens a
+//! console window behind the picture, because cargo builds binaries as console
+//! programs by default.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+//!
 //! `MTCODEC_VIEWER_AUTOCLOSE_MS` closes the window after that many milliseconds
 //! and prints `viewer ok`, which is how the build check drives it.
 //! `MTCODEC_VIEWER_ZOOM` opens at an absolute zoom factor instead of fit.

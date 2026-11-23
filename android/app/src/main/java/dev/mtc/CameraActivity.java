@@ -63,6 +63,7 @@ public class CameraActivity extends Activity {
     private CameraCaptureSession session;
     private ImageReader stills;
     private Size stillSize = new Size(1920, 1080);
+    private Size previewSize = new Size(1280, 720);
     private String cameraId;
     private boolean busy;
     private final int quality = 88;
@@ -224,6 +225,7 @@ public class CameraActivity extends Activity {
             StreamConfigurationMap map =
                     chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
             stillSize = pickStillSize(map);
+            previewSize = pickPreviewSize(map, stillSize);
             Integer sensor = chars.get(CameraCharacteristics.SENSOR_ORIENTATION);
             sensorOrientation = sensor == null ? 90 : sensor.intValue();
             stills = ImageReader.newInstance(stillSize.getWidth(), stillSize.getHeight(),
@@ -289,6 +291,44 @@ public class CameraActivity extends Activity {
         return fallback;
     }
 
+    /**
+     * The size the preview surface is actually created with.
+     *
+     * <p>This used to be the still size, up to 3264x2448. A camera does not offer
+     * that as a preview size, so the preview stream never produced a frame: the
+     * screen stayed black while the shutter still worked, because the still goes
+     * through its own ImageReader. Preview and still are separate streams and are
+     * allowed to differ.
+     */
+    private Size pickPreviewSize(StreamConfigurationMap map, Size still) {
+        Size[] sizes = map == null ? null : map.getOutputSizes(SurfaceTexture.class);
+        if (sizes == null || sizes.length == 0) {
+            return new Size(1280, 720);
+        }
+        double target = (double) still.getWidth() / still.getHeight();
+        Size best = null;
+        Size closest = sizes[0];
+        double closestDelta = Double.MAX_VALUE;
+        for (int i = 0; i < sizes.length; i++) {
+            Size s = sizes[i];
+            long pixels = (long) s.getWidth() * s.getHeight();
+            double aspect = (double) s.getWidth() / s.getHeight();
+            double delta = Math.abs(aspect - target);
+            if (delta < closestDelta) {
+                closestDelta = delta;
+                closest = s;
+            }
+            // Same shape as the photo, and no bigger than 1080p: full HD is plenty
+            // for a preview and keeps the texture cheap.
+            if (delta < 0.02 && pixels <= 1920 * 1088) {
+                if (best == null || pixels > (long) best.getWidth() * best.getHeight()) {
+                    best = s;
+                }
+            }
+        }
+        return best != null ? best : closest;
+    }
+
     private Size pickStillSize(StreamConfigurationMap map) {
         Size[] sizes = map == null ? null : map.getOutputSizes(ImageFormat.YUV_420_888);
         if (sizes == null || sizes.length == 0) {
@@ -352,20 +392,30 @@ public class CameraActivity extends Activity {
             return;
         }
         // Turn by the same angle the still gets, measured from the sensor, so the
-        // preview and the saved picture cannot disagree. The old hardcoded
-        // "90 * (displayRotation - 2)" assumed a 90 degree sensor and put a 270
-        // degree module upside down.
+        // preview and the saved picture cannot disagree.
         int deg = stillRotation();
         float vw = preview.getWidth();
         float vh = preview.getHeight();
         boolean swapped = (deg % 180) != 0;
-        float bw = swapped ? stillSize.getHeight() : stillSize.getWidth();
-        float bh = swapped ? stillSize.getWidth() : stillSize.getHeight();
-        float scale = Math.max(vw / bw, vh / bh);
+
+        // The texture is the sensor's landscape buffer; after the turn its width and
+        // height swap. Centre that rectangle on the screen, then let a uniform scale
+        // and the rotation about the screen centre do the rest - the recipe from the
+        // Camera2 sample, with the quarter turn taken from the sensor instead of
+        // from a hardcoded 90.
+        android.graphics.RectF viewRect = new android.graphics.RectF(0, 0, vw, vh);
+        android.graphics.RectF bufferRect = new android.graphics.RectF(0, 0,
+                swapped ? previewSize.getHeight() : previewSize.getWidth(),
+                swapped ? previewSize.getWidth() : previewSize.getHeight());
+        float cx = viewRect.centerX();
+        float cy = viewRect.centerY();
+        bufferRect.offset(cx - bufferRect.centerX(), cy - bufferRect.centerY());
+
         android.graphics.Matrix matrix = new android.graphics.Matrix();
-        matrix.postScale(scale, scale);
-        matrix.postRotate(deg);
-        matrix.postTranslate((vw - bw * scale) / 2f, (vh - bh * scale) / 2f);
+        matrix.setRectToRect(viewRect, bufferRect, android.graphics.Matrix.ScaleToFit.FILL);
+        float scale = Math.max(vh / bufferRect.height(), vw / bufferRect.width());
+        matrix.postScale(scale, scale, cx, cy);
+        matrix.postRotate(deg, cx, cy);
         preview.setTransform(matrix);
     }
 
@@ -375,12 +425,18 @@ public class CameraActivity extends Activity {
         }
         try {
             SurfaceTexture texture = preview.getSurfaceTexture();
-            texture.setDefaultBufferSize(stillSize.getWidth(), stillSize.getHeight());
+            texture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
             Surface surface = new Surface(texture);
             final CaptureRequest.Builder builder =
                     device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
             builder.addTarget(surface);
             builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO);
+            // Ask for continuous autofocus and auto exposure explicitly. A device
+            // that is never told to focus may keep the lens where it was, and every
+            // picture comes out soft - so this is not a nicety.
+            builder.set(CaptureRequest.CONTROL_AF_MODE,
+                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
 
             List<Surface> targets = new ArrayList<Surface>();
             targets.add(surface);
@@ -401,8 +457,9 @@ public class CameraActivity extends Activity {
                             @Override
                             public void run() {
                                 hud.setText(String.format(Locale.US,
-                                        "%d×%d · q%d · 传感器 %d° 转 %d°",
-                                        stillSize.getWidth(), stillSize.getHeight(), quality,
+                                        "拍 %d×%d · 预览 %d×%d · q%d · 传感器 %d° 转 %d°",
+                                        stillSize.getWidth(), stillSize.getHeight(),
+                                        previewSize.getWidth(), previewSize.getHeight(), quality,
                                         sensorOrientation, stillRotation()));
                             }
                         });
@@ -449,6 +506,12 @@ public class CameraActivity extends Activity {
                     device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
             builder.addTarget(stills.getSurface());
             builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO);
+            // The preview runs continuous autofocus; carry it into the still so the
+            // frame that gets compressed is a focused one. Without an AF mode some
+            // devices never move the lens, and every photo is soft.
+            builder.set(CaptureRequest.CONTROL_AF_MODE,
+                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
             session.capture(builder.build(), null, cameraHandler);
         } catch (CameraAccessException e) {
             busy = false;

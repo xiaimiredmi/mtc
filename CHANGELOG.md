@@ -6,6 +6,26 @@ All notable changes to this project. Format based on
 
 ---
 
+## [1.5.1] — 2026-11-23
+
+真机实测报上来的三个问题，都是代码里的明确错误。
+
+### 安卓：预览全黑，但快门能用
+
+预览缓冲用的是**拍照尺寸**（最高 3264×2448），那不是相机支持的预览尺寸，于是预览流一帧不出；
+拍照走的是另一个 ImageReader，所以快门照旧。现在预览自己挑尺寸（与照片同比例、不超过 1080p），
+变换矩阵换成 Camera2 标准配方，四分之一圈的角度仍取自 `SENSOR_ORIENTATION`，与保存的照片一致。
+相机顶部显示 `拍 … · 预览 … · q88 · 传感器 …° 转 …°`，出问题一眼能对。
+
+### 安卓：照片发虚
+
+两路请求都没设过对焦模式。现在预览与拍照都显式设 `CONTROL_AF_MODE_CONTINUOUS_PICTURE`
+与 `CONTROL_AE_MODE_ON`——不告诉设备去对焦，有些机型就一直不对，拍什么都软。
+
+### Windows：双击 .mtc 多出一个黑窗口
+
+`mtview.exe` 之前是控制台子系统（cargo 默认），双击文件时 Windows 先开一个黑窗口。
+release 构建改为 GUI 子系统（`windows_subsystem = "windows"`）。命令行三个程序仍是控制台程序。
 ## [1.5.0] — 2026-11-22
 
 ### 新增
@@ -333,6 +353,26 @@ All notable changes to this project. Format based on
 
 # 中文
 
+## [1.5.1] — 2026-11-23
+
+真机实测报上来的三个问题，都是代码里的明确错误。
+
+### 安卓：预览全黑，但快门能用
+
+预览缓冲用的是**拍照尺寸**（最高 3264×2448），那不是相机支持的预览尺寸，于是预览流一帧不出；
+拍照走的是另一个 ImageReader，所以快门照旧。现在预览自己挑尺寸（与照片同比例、不超过 1080p），
+变换矩阵换成 Camera2 标准配方，四分之一圈的角度仍取自 `SENSOR_ORIENTATION`，与保存的照片一致。
+相机顶部显示 `拍 … · 预览 … · q88 · 传感器 …° 转 …°`，出问题一眼能对。
+
+### 安卓：照片发虚
+
+两路请求都没设过对焦模式。现在预览与拍照都显式设 `CONTROL_AF_MODE_CONTINUOUS_PICTURE`
+与 `CONTROL_AE_MODE_ON`——不告诉设备去对焦，有些机型就一直不对，拍什么都软。
+
+### Windows：双击 .mtc 多出一个黑窗口
+
+`mtview.exe` 之前是控制台子系统（cargo 默认），双击文件时 Windows 先开一个黑窗口。
+release 构建改为 GUI 子系统（`windows_subsystem = "windows"`）。命令行三个程序仍是控制台程序。
 ## [1.5.0] — 2026-11-22
 
 ### 新增

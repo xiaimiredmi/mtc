@@ -31,8 +31,8 @@ using Microsoft.Win32;
 [assembly: AssemblyDescription("MTC image codec, viewer and command line tools")]
 [assembly: AssemblyProduct("MTC")]
 [assembly: AssemblyCompany("xiaimiredmi")]
-[assembly: AssemblyVersion("0.2.0.0")]
-[assembly: AssemblyFileVersion("0.2.0.0")]
+[assembly: AssemblyVersion("1.5.1.0")]
+[assembly: AssemblyFileVersion("1.5.1.0")]
 
 namespace MtcSetup
 {
@@ -52,7 +52,7 @@ namespace MtcSetup
     internal static class Program
     {
         internal const string AppName = "MTC";
-        internal const string Version = "0.2.0";
+        internal const string Version = "1.5.1";
         internal const string Publisher = "xiaimiredmi";
         internal const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\MTC";
         internal const string ClassKey = @"Software\Classes\MTC.Image";
