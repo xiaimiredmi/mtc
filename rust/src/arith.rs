@@ -97,7 +97,6 @@ impl<'a> Dec<'a> {
         d
     }
 
-    #[inline]
     #[inline(always)]
     fn next_byte(&mut self) -> u32 {
         let p = self.pos;
@@ -108,8 +107,6 @@ impl<'a> Dec<'a> {
             0
         }
     }
-
-    #[inline]
     /// One binary decision.
     ///
     /// The probability slot is read and written through a raw pointer: with a slice

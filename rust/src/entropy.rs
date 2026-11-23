@@ -190,7 +190,6 @@ impl ResidualModel {
 }
 
 /// Context for the `last` symbol, from the previous block's `last`.
-#[inline]
 #[inline(always)]
 fn last_ctx(layout: u8, left: &Left) -> usize {
     if layout == LAYOUT_CTX {
