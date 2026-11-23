@@ -58,7 +58,7 @@ fn level_of(mult: f64) -> usize {
 }
 
 /// Per-tile activity, as the mean absolute gradient over the tile.
-fn tile_activity(px: &[i32], w: usize, h: usize, tx: usize, ty: usize) -> f64 {
+fn tile_activity(px: &[i16], w: usize, h: usize, tx: usize, ty: usize) -> f64 {
     let mut sum = 0i64;
     let y1 = ((ty + 1) * TILE * 8).min(h);
     let x1 = ((tx + 1) * TILE * 8).min(w);
@@ -81,7 +81,7 @@ fn tile_activity(px: &[i32], w: usize, h: usize, tx: usize, ty: usize) -> f64 {
     }
 }
 
-pub fn analyse(px: &[i32], w: usize, h: usize) -> Map {
+pub fn analyse(px: &[i16], w: usize, h: usize) -> Map {
     let tiles_w = (w / 8 + TILE - 1) / TILE;
     let tiles_h = (h / 8 + TILE - 1) / TILE;
     let mut act = Vec::with_capacity(tiles_w * tiles_h);
@@ -173,7 +173,7 @@ mod tests {
     fn flat_plane_stays_neutral() {
         let w = 32;
         let h = 32;
-        let px = vec![90i32; w * h];
+        let px = vec![90i16; w * h];
         let map = analyse(&px, w, h);
         assert!(map.levels.iter().all(|&l| l as usize == NEUTRAL));
     }
@@ -181,7 +181,7 @@ mod tests {
     #[test]
     fn busy_tile_gets_finer_step_than_flat_tile() {
         let (w, h) = (64, 32);
-        let mut px = vec![100i32; w * h];
+        let mut px = vec![100i16; w * h];
         // Left half flat, right half a busy checkerboard.
         for y in 0..h {
             for x in w / 2..w {

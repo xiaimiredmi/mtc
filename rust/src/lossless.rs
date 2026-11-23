@@ -16,7 +16,8 @@ use crate::entropy::ResidualModel;
 /// Median edge detector: pick the smaller neighbour next to an edge, otherwise
 /// extrapolate along the diagonal.
 #[inline]
-fn med(a: i32, b: i32, c: i32) -> i32 {
+fn med(a: i16, b: i16, c: i16) -> i32 {
+    let (a, b, c) = (a as i32, b as i32, c as i32);
     let (mx, mn) = if a > b { (a, b) } else { (b, a) };
     if c >= mx {
         mn
@@ -30,7 +31,8 @@ fn med(a: i32, b: i32, c: i32) -> i32 {
 /// Activity class from the two neighbour differences: five buckets, coarser as
 /// the neighbourhood gets busier.
 #[inline]
-pub fn ctx_of(activity: i32) -> usize {
+pub fn ctx_of(activity: i16) -> usize {
+    let activity = activity as i32;
     match activity {
         i32::MIN..=1 => 0,
         2..=3 => 1,
@@ -61,8 +63,8 @@ pub fn encode_planes(planes: &[Plane]) -> Vec<u8> {
                     (b, c)
                 };
                 let p = med(a, b, c);
-                let act = (a - c).abs() + (b - c).abs();
-                model.enc_res(&mut enc, pl, ctx_of(act), plane.px[y * w + x] - p);
+                let act = ((a - c).abs() + (b - c).abs()) as i16;
+                model.enc_res(&mut enc, pl, ctx_of(act), plane.px[y * w + x] as i32 - p);
             }
         }
     }
@@ -80,7 +82,7 @@ pub fn decode_planes(
     let mut out = Vec::with_capacity(shapes.len());
     for (pl, &(w, h)) in shapes.iter().enumerate() {
         let clip = clips[pl];
-        let mut px = vec![0i32; w * h];
+        let mut px = vec![0i16; w * h];
         for y in 0..h {
             for x in 0..w {
                 let a = if x > 0 { px[y * w + x - 1] } else { 0 };
@@ -92,9 +94,9 @@ pub fn decode_planes(
                     (b, c)
                 };
                 let p = med(a, b, c);
-                let act = (a - c).abs() + (b - c).abs();
+                let act = ((a - c).abs() + (b - c).abs()) as i16;
                 let r = model.dec_res(&mut dec, pl, ctx_of(act));
-                px[y * w + x] = (p + r).clamp(clip.lo, clip.hi);
+                px[y * w + x] = (p + r).clamp(clip.lo as i32, clip.hi as i32) as i16;
             }
         }
         out.push(Plane { w, h, px });
@@ -108,12 +110,12 @@ mod tests {
     use crate::codec::{clip_for_plane, Plane};
 
     fn plane(w: usize, h: usize, seed: u32) -> Plane {
-        let mut px = vec![0i32; w * h];
+        let mut px = vec![0i16; w * h];
         let mut s = seed.wrapping_mul(2654435761);
         for y in 0..h {
             for x in 0..w {
                 s = s.wrapping_mul(1664525).wrapping_add(1013904223);
-                px[y * w + x] = ((x * 3 + y * 5) as i32 + ((s >> 29) as i32) - 3).clamp(0, 255);
+                px[y * w + x] = ((x * 3 + y * 5) as i32 + ((s >> 29) as i32) - 3).clamp(0, 255) as i16;
             }
         }
         Plane { w, h, px }
@@ -149,12 +151,12 @@ mod tests {
         let co = Plane {
             w: 32,
             h: 16,
-            px: (0..32 * 16).map(|i| (i as i32 % 511) - 255).collect(),
+            px: (0..32 * 16).map(|i| ((i as i32 % 511) - 255) as i16).collect(),
         };
         let cg = Plane {
             w: 32,
             h: 16,
-            px: (0..32 * 16).map(|i| 120 - (i as i32 % 241)).collect(),
+            px: (0..32 * 16).map(|i| (120 - (i as i32 % 241)) as i16).collect(),
         };
         let payload = encode_planes(&[y.clone(), co.clone(), cg.clone()]);
         let clips: Vec<_> = (0..3).map(clip_for_plane).collect();

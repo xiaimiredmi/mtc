@@ -15,13 +15,13 @@ pub const CHROMA_GAIN: f64 = 1.35;
 pub struct Plane {
     pub w: usize,
     pub h: usize,
-    pub px: Vec<i32>,
+    pub px: Vec<i16>,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct Clip {
-    pub lo: i32,
-    pub hi: i32,
+    pub lo: i16,
+    pub hi: i16,
 }
 
 /// Luma is clipped to a byte range after reconstruction, chroma to the range the
@@ -219,7 +219,7 @@ pub fn decode_planes(
         let mut up = vec![0i32; blocks_w];
         let mut cur = vec![0i32; blocks_w];
         let med = layout == crate::entropy::LAYOUT_CTX;
-        let mut plane = vec![0i32; pw * ph];
+        let mut plane = vec![0i16; pw * ph];
         let clip = clips[pl];
 
         for by in 0..blocks_h {
@@ -262,7 +262,7 @@ pub fn decode_planes(
                 let blk = idct_f32(&coef, &basis);
                 for y in 0..8 {
                     for x in 0..8 {
-                        let v = round_i32(blk[y][x]).clamp(clip.lo, clip.hi);
+                        let v = round_i32(blk[y][x]).clamp(clip.lo as i32, clip.hi as i32) as i16;
                         plane[(by * 8 + y) * pw + bx * 8 + x] = v;
                     }
                 }
@@ -292,13 +292,13 @@ mod tests {
     use crate::entropy::{LAYOUT_CTX, LAYOUT_FLAT};
 
     fn ramp_plane(w: usize, h: usize, seed: u32) -> Plane {
-        let mut px = vec![0i32; w * h];
+        let mut px = vec![0i16; w * h];
         let mut s = seed.wrapping_mul(2654435761);
         for y in 0..h {
             for x in 0..w {
                 s = s.wrapping_mul(1664525).wrapping_add(1013904223);
                 let noise = ((s >> 28) as i32) - 8;
-                px[y * w + x] = (40 + ((x * 2 + y * 3) % 96) as i32 + noise).clamp(0, 255);
+                px[y * w + x] = (40 + ((x * 2 + y * 3) % 96) as i32 + noise).clamp(0, 255) as i16;
             }
         }
         Plane { w, h, px }
@@ -356,7 +356,7 @@ mod tests {
         let planes = vec![Plane {
             w: 32,
             h: 32,
-            px: vec![120i32; 32 * 32],
+            px: vec![120i16; 32 * 32],
         }];
         let shapes = vec![(32usize, 32usize)];
         let clips = vec![clip_for_plane(0)];

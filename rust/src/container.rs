@@ -245,7 +245,8 @@ fn fwd(r: i32, g: i32, b: i32) -> (i32, i32, i32) {
 }
 
 #[inline]
-fn inv(y: i32, co: i32, cg: i32) -> (i32, i32, i32) {
+fn inv(y: i16, co: i16, cg: i16) -> (i32, i32, i32) {
+    let (y, co, cg) = (y as i32, co as i32, cg as i32);
     let t = y - (cg >> 1);
     let g = cg + t;
     let b = t - (co >> 1);
@@ -381,21 +382,21 @@ fn assemble(img: &Image, opts: &Options, aq_on: bool) -> Result<Vec<u8>, String>
     let (md, payload) = if opts.lossless {
         // No padding and no quantiser: planes are coded at their real size.
         let planes = if solid == 1 {
-            let px = rgb.iter().map(|v| *v as i32).collect::<Vec<i32>>();
+            let px = rgb.iter().map(|v| *v as i16).collect::<Vec<i16>>();
             vec![Plane { w, h, px }]
         } else {
-            let mut y_plane = vec![0i32; w * h];
-            let mut co = vec![0i32; w * h];
-            let mut cg = vec![0i32; w * h];
+            let mut y_plane = vec![0i16; w * h];
+            let mut co = vec![0i16; w * h];
+            let mut cg = vec![0i16; w * h];
             for p in 0..w * h {
                 let (yy, co_v, cg_v) = fwd(
                     rgb[p * 3] as i32,
                     rgb[p * 3 + 1] as i32,
                     rgb[p * 3 + 2] as i32,
                 );
-                y_plane[p] = yy;
-                co[p] = co_v;
-                cg[p] = cg_v;
+                y_plane[p] = yy as i16;
+                co[p] = co_v as i16;
+                cg[p] = cg_v as i16;
             }
             vec![
                 Plane {
@@ -416,10 +417,10 @@ fn assemble(img: &Image, opts: &Options, aq_on: bool) -> Result<Vec<u8>, String>
     } else if solid == 1 {
         let pw = align(w, 8);
         let ph = align(h, 8);
-        let mut px = vec![0i32; pw * ph];
+        let mut px = vec![0i16; pw * ph];
         for y in 0..ph {
             for x in 0..pw {
-                px[y * pw + x] = rgb[y.min(h - 1) * w + x.min(w - 1)] as i32;
+                px[y * pw + x] = rgb[y.min(h - 1) * w + x.min(w - 1)] as i16;
             }
         }
         let planes = vec![Plane { w: pw, h: ph, px }];
@@ -431,14 +432,14 @@ fn assemble(img: &Image, opts: &Options, aq_on: bool) -> Result<Vec<u8>, String>
         let mult = if opts.subsample_420 { 16 } else { 8 };
         let pw = align(w, mult);
         let ph = align(h, mult);
-        let mut y_plane = vec![0i32; pw * ph];
+        let mut y_plane = vec![0i16; pw * ph];
         let (cw, ch) = if opts.subsample_420 {
             (pw / 2, ph / 2)
         } else {
             (pw, ph)
         };
-        let mut co = vec![0i32; cw * ch];
-        let mut cg = vec![0i32; cw * ch];
+        let mut co = vec![0i16; cw * ch];
+        let mut cg = vec![0i16; cw * ch];
         if opts.subsample_420 {
             let mut acc_co = vec![0i32; cw * ch];
             let mut acc_cg = vec![0i32; cw * ch];
@@ -447,15 +448,15 @@ fn assemble(img: &Image, opts: &Options, aq_on: bool) -> Result<Vec<u8>, String>
                     let p = (yy.min(h - 1) * w + xx.min(w - 1)) * 3;
                     let (a, b, c) =
                         fwd(rgb[p] as i32, rgb[p + 1] as i32, rgb[p + 2] as i32);
-                    y_plane[yy * pw + xx] = a;
+                    y_plane[yy * pw + xx] = a as i16;
                     let q = (yy / 2) * cw + xx / 2;
-                    acc_co[q] += b;
+                    acc_co[q] += b;   // acc_co is i32
                     acc_cg[q] += c;
                 }
             }
             for i in 0..cw * ch {
-                co[i] = acc_co[i] >> 2;
-                cg[i] = acc_cg[i] >> 2;
+                co[i] = (acc_co[i] >> 2) as i16;
+                cg[i] = (acc_cg[i] >> 2) as i16;
             }
         } else {
             for yy in 0..ph {
@@ -463,9 +464,9 @@ fn assemble(img: &Image, opts: &Options, aq_on: bool) -> Result<Vec<u8>, String>
                     let p = (yy.min(h - 1) * w + xx.min(w - 1)) * 3;
                     let (a, b, c) =
                         fwd(rgb[p] as i32, rgb[p + 1] as i32, rgb[p + 2] as i32);
-                    y_plane[yy * pw + xx] = a;
-                    co[yy * pw + xx] = b;
-                    cg[yy * pw + xx] = c;
+                    y_plane[yy * pw + xx] = a as i16;
+                    co[yy * pw + xx] = b as i16;
+                    cg[yy * pw + xx] = c as i16;
                 }
             }
         }
@@ -507,7 +508,7 @@ fn assemble(img: &Image, opts: &Options, aq_on: bool) -> Result<Vec<u8>, String>
             let plane = Plane {
                 w,
                 h,
-                px: a.iter().map(|v| *v as i32).collect(),
+                px: a.iter().map(|v| *v as i16).collect(),
             };
             Some(lossless::encode_planes(std::slice::from_ref(&plane)))
         }
