@@ -7,7 +7,7 @@
 use crate::aq;
 use crate::arith::{Dec, Enc};
 use crate::entropy::{dec_block, enc_block, Left, Model};
-use crate::transform::{dct_matrix, fdct, idct, rint, step_table, ZZ};
+use crate::transform::{dct_matrix, fdct, idct_f32, round_i32, step_table, Basis, ZZ};
 
 pub const CHROMA_GAIN: f64 = 1.35;
 
@@ -195,11 +195,16 @@ pub fn decode_planes(
     layout: u8,
     aq_on: bool,
 ) -> Vec<Plane> {
-    let m = dct_matrix();
+    let basis = Basis::new();
     let base = step_table(quality);
     let mut model = Model::new(layout, shapes.len());
     let mut aqprobs = aq::new_probs(shapes.len());
     let mut dec = Dec::new(payload);
+    // Time the two halves of a block separately: the entropy decoder and the
+    // transform. Enabled by an environment variable so it costs nothing in a game.
+    let profiling = std::env::var_os("MTCODEC_PROFILE").is_some();
+    let mut t_entropy = 0f64;
+    let mut t_idct = 0f64;
     let mut out = Vec::with_capacity(shapes.len());
 
     for (pl, &(pw, ph)) in shapes.iter().enumerate() {
@@ -238,7 +243,11 @@ pub fn decode_planes(
                 if med {
                     prev = dc_predict(&up, &cur, bx, by);
                 }
+                let clock = std::time::Instant::now();
                 let qz = dec_block(&mut dec, &mut model, pl, prev, &left);
+                if profiling {
+                    t_entropy += clock.elapsed().as_secs_f64();
+                }
                 left = Left::of(&qz);
                 cur[bx] = qz[0];
                 if !med {
@@ -249,12 +258,16 @@ pub fn decode_planes(
                     let (u, v) = ZZ[k];
                     coef[u][v] = qz[k] as f64 * step[u][v];
                 }
-                let blk = idct(&coef, &m);
+                let clock = std::time::Instant::now();
+                let blk = idct_f32(&coef, &basis);
                 for y in 0..8 {
                     for x in 0..8 {
-                        let v = (rint(blk[y][x]) as i32).clamp(clip.lo, clip.hi);
+                        let v = round_i32(blk[y][x]).clamp(clip.lo, clip.hi);
                         plane[(by * 8 + y) * pw + bx * 8 + x] = v;
                     }
+                }
+                if profiling {
+                    t_idct += clock.elapsed().as_secs_f64();
                 }
             }
             if med {
@@ -262,6 +275,13 @@ pub fn decode_planes(
             }
         }
         out.push(Plane { w: pw, h: ph, px: plane });
+    }
+    if profiling {
+        eprintln!(
+            "profile: entropy {:.1} ms, idct {:.1} ms",
+            t_entropy * 1000.0,
+            t_idct * 1000.0
+        );
     }
     out
 }

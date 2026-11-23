@@ -11,6 +11,8 @@ wasm/target/
 # --- Windows installer ---
 installer/payload/
 installer/MtcPayload.zip
+capi/target/
+capi/build/
 installer/csc.log
 
 # --- Android ---

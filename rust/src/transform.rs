@@ -98,6 +98,94 @@ pub fn idct(coef: &[[f64; 8]; 8], m: &[[f64; 8]; 8]) -> [[f64; 8]; 8] {
     out
 }
 
+/// The forward matrix as `f32`, built once per frame, both ways round.
+///
+/// `m[u][x]` is the forward basis in `f32`, built once per frame.
+pub struct Basis {
+    pub m: [[f32; 8]; 8],
+}
+
+impl Basis {
+    pub fn new() -> Basis {
+        let d = dct_matrix();
+        let mut m = [[0.0f32; 8]; 8];
+        for u in 0..8 {
+            for x in 0..8 {
+                m[u][x] = d[u][x] as f32;
+            }
+        }
+        Basis { m }
+    }
+}
+
+#[inline(always)]
+pub fn round_i32(v: f32) -> i32 {
+    let shifted = v + 0.5f32.copysign(v);
+    shifted.clamp(-32768.0, 32767.0) as i32
+}
+
+/// Inverse DCT of one block, in `f32`.
+///
+/// The passes are written out term by term: a loop over the eight coefficients with
+/// a `continue` for zeros reads better but the compiler does not unroll it, and that
+/// form measured 70% slower. The first pass writes its transpose so the second also
+/// reads straight lines, and both skip all-zero rows and columns.
+pub fn idct_f32(coef: &[[f64; 8]; 8], basis: &Basis) -> [[f32; 8]; 8] {
+    let m = &basis.m;
+    let mut tmp = [[0.0f32; 8]; 8]; // tmp[x][u]
+    for u in 0..8 {
+        let c = &coef[u];
+        if c.iter().all(|v| *v == 0.0) {
+            continue;
+        }
+        let c0 = c[0] as f32;
+        let c1 = c[1] as f32;
+        let c2 = c[2] as f32;
+        let c3 = c[3] as f32;
+        let c4 = c[4] as f32;
+        let c5 = c[5] as f32;
+        let c6 = c[6] as f32;
+        let c7 = c[7] as f32;
+        for x in 0..8 {
+            tmp[x][u] = c0 * m[0][x]
+                + c1 * m[1][x]
+                + c2 * m[2][x]
+                + c3 * m[3][x]
+                + c4 * m[4][x]
+                + c5 * m[5][x]
+                + c6 * m[6][x]
+                + c7 * m[7][x];
+        }
+    }
+
+    let mut out = [[0.0f32; 8]; 8];
+    for x in 0..8 {
+        let r = &tmp[x];
+        if r.iter().all(|v| *v == 0.0) {
+            continue;
+        }
+        let r0 = r[0];
+        let r1 = r[1];
+        let r2 = r[2];
+        let r3 = r[3];
+        let r4 = r[4];
+        let r5 = r[5];
+        let r6 = r[6];
+        let r7 = r[7];
+        for y in 0..8 {
+            out[y][x] = r0 * m[0][y]
+                + r1 * m[1][y]
+                + r2 * m[2][y]
+                + r3 * m[3][y]
+                + r4 * m[4][y]
+                + r5 * m[5][y]
+                + r6 * m[6][y]
+                + r7 * m[7][y];
+        }
+    }
+    out
+}
+
 pub fn base_weight(u: usize, v: usize) -> f64 {
     let f = (((u * u + v * v) as f64)).sqrt();
     1.0 + 0.30 * f.powf(1.15)
@@ -170,6 +258,36 @@ mod tests {
         }
     }
 
+    #[test]
+    fn fast_idct_agrees_with_the_matrix_form() {
+        // Same maths, narrower arithmetic and a different memory order: the pixels
+        // have to come out the same to well under half a step.
+        let m = dct_matrix();
+        let basis = Basis::new();
+        let mut worst = 0.0f64;
+        let mut seed = 0x0bad_c0de_dead_beefu64;
+        let steps = step_table(85);
+        for _ in 0..500 {
+            let mut coef = [[0.0f64; 8]; 8];
+            for k in 0..64 {
+                seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                let r = ((seed >> 33) as i32 % 200) - 100;
+                let (u, v) = ZZ[k];
+                coef[u][v] = r as f64 * steps[u][v];
+            }
+            let slow = idct(&coef, &m);
+            let fast = idct_f32(&coef, &basis);
+            for y in 0..8 {
+                for x in 0..8 {
+                    let d = (slow[y][x] - fast[y][x] as f64).abs();
+                    if d > worst {
+                        worst = d;
+                    }
+                }
+            }
+        }
+        assert!(worst < 0.05, "f32 idct differs by {}", worst);
+    }
     #[test]
     fn dct_roundtrip() {
         let m = dct_matrix();

@@ -1,0 +1,17 @@
+[package]
+name = "mtc-capi"
+version = "1.6.0"
+edition = "2021"
+
+[lib]
+name = "mtc"
+crate-type = ["cdylib"]
+
+[dependencies]
+mtc = { path = "../rust" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = "symbols"

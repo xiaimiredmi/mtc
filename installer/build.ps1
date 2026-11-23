@@ -37,6 +37,10 @@ $stage = Join-Path $env:TEMP ('mtc-payload-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 try {
     Copy-Item (Join-Path $bin '*.exe') $stage -Force
+    foreach ($extra in 'mtc.dll', 'mtc.h') {
+        $src = Join-Path $bin $extra
+        if (Test-Path $src) { Copy-Item $src (Join-Path $stage $extra) -Force }
+    }
     $icon = Join-Path $root 'deploy\mtc.ico'
     if (Test-Path $icon) { Copy-Item $icon (Join-Path $stage 'mtc.ico') -Force }
     $license = Join-Path $root 'LICENSE'
@@ -54,6 +58,9 @@ MTC $Version - image codec, viewer and tools
   mtbench                      rate/distortion harness
 
 The full documentation is in the repository: https://github.com/xiaimiredmi/mtc
+
+For a game: mtc.dll + mtc.h next to the tools. Link mtc.dll and include mtc.h; the C
+API decodes straight into a texture buffer and can scale while decoding.
 
 Uninstall: Settings > Apps, or run uninstall.exe in this folder.
 "@
