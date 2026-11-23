@@ -15,7 +15,9 @@ fn usage() -> ExitCode {
     eprintln!("  mtcodec info <file.mtc>");
     eprintln!("  mtcodec encode <in.png> <out.mtc> [-q 1..100] [-s 420|444] [--lossless]");
     eprintln!("                 [--aq off|on|auto] [--v1]");
-    eprintln!("  mtcodec decode <in.mtc> <out.png> [--max-side N]");
+    eprintln!("  mtcodec decode <in.mtc> <out.png> [--max-side N] [--rect x,y,w,h]");
+    eprintln!("      --max-side decodes straight to a smaller picture;");
+    eprintln!("      --rect decodes one rectangle, skipping the transform elsewhere.");
     eprintln!();
     eprintln!("  -q     quality, higher is bigger and closer (default 85)");
     eprintln!("  -s     chroma subsampling for colour (default 420)");
@@ -117,12 +119,25 @@ fn cmd_decode(args: &[String]) -> Result<(), String> {
     }
     let (input, output) = (&args[2], &args[3]);
     let mut max_side = 0usize;
+    let mut rect: Option<(usize, usize, usize, usize)> = None;
     let mut i = 4;
     while i < args.len() {
         if args[i] == "--max-side" && i + 1 < args.len() {
             max_side = args[i + 1]
                 .parse()
                 .map_err(|_| "bad --max-side".to_string())?;
+            i += 2;
+        } else if args[i] == "--rect" && i + 1 < args.len() {
+            // x,y,w,h - decode one rectangle, skipping the transform for the rest.
+            let parts: Vec<usize> = args[i + 1]
+                .split(',')
+                .map(|p| p.trim().parse::<usize>())
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| "bad --rect, want x,y,w,h".to_string())?;
+            if parts.len() != 4 {
+                return Err("bad --rect, want x,y,w,h".into());
+            }
+            rect = Some((parts[0], parts[1], parts[2], parts[3]));
             i += 2;
         } else {
             return Err(format!("unknown argument: {}", args[i]));
@@ -131,7 +146,9 @@ fn cmd_decode(args: &[String]) -> Result<(), String> {
     let data = fs::read(input).map_err(|e| format!("{}: {}", input, e))?;
     let t0 = Instant::now();
     // A bounded size decodes straight to it instead of building the full picture.
-    let img = if max_side > 0 {
+    let img = if let Some((x, y, w, h)) = rect {
+        container::decode_region(&data, x, y, w, h)?
+    } else if max_side > 0 {
         container::decode_downsized(&data, max_side)?
     } else {
         container::decode(&data)?

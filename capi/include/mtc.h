@@ -83,6 +83,16 @@ MTC_API int32_t mtc_decode_rgb(const uint8_t* data, int32_t len, int32_t max_sid
                                uint8_t** out_rgb, int32_t* out_w, int32_t* out_h);
 
 /*
+ * Decode one rectangle. Same contract as mtc_decode_rgba, but only the pixels inside
+ * (x, y, w, h) are reconstructed: the coefficient stream is walked in full - it is
+ * sequential - yet the transform and colour conversion for everything else is
+ * skipped. A quarter of a 2048x2048 picture costs about 60% of the whole.
+ */
+MTC_API int32_t mtc_decode_region(const uint8_t* data, int32_t len, int32_t x, int32_t y,
+                                  int32_t w, int32_t h, uint8_t** out_rgba,
+                                  int32_t* out_w, int32_t* out_h);
+
+/*
  * Encode pixels: `channels` is 1 (grey), 3 (RGB) or 4 (RGBA).
  *
  * `quality` is 1..100; 100 is not lossless - for that pass `lossless` = 1, which is

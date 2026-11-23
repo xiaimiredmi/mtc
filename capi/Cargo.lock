@@ -125,14 +125,14 @@ dependencies = [
 
 [[package]]
 name = "mtc"
-version = "1.5.1"
+version = "1.6.0"
 dependencies = [
  "image",
 ]
 
 [[package]]
 name = "mtc-capi"
-version = "1.5.1"
+version = "1.6.0"
 dependencies = [
  "mtc",
 ]

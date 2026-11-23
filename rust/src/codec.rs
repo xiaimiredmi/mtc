@@ -195,6 +195,50 @@ pub fn decode_planes(
     layout: u8,
     aq_on: bool,
 ) -> Vec<Plane> {
+    decode_planes_region(payload, shapes, clips, quality, layout, aq_on, None)
+}
+
+/// Which blocks to reconstruct, per plane: chroma covers half the pixels of luma in
+/// 4:2:0, so it needs its own rectangle.
+#[derive(Clone, Copy, Debug)]
+pub struct BlockRegions {
+    pub luma: BlockRegion,
+    pub chroma: BlockRegion,
+}
+
+/// A rectangle of blocks worth reconstructing, in blocks rather than pixels.
+#[derive(Clone, Copy, Debug)]
+pub struct BlockRegion {
+    pub x0: usize,
+    pub y0: usize,
+    pub x1: usize,
+    pub y1: usize,
+}
+
+impl BlockRegion {
+    #[inline(always)]
+    fn hit(&self, bx: usize, by: usize) -> bool {
+        bx >= self.x0 && bx < self.x1 && by >= self.y0 && by < self.y1
+    }
+}
+
+/// Decode the planes, reconstructing only the blocks in `region` (all of them when
+/// it is `None`).
+///
+/// The coefficients are always read in full: the arithmetic coder is sequential, so
+/// there is no way to skip a block's symbols. What can be skipped is the expensive
+/// half - dequantising, the inverse transform and the pixel store - which is where
+/// most of the time goes for a block outside the region.
+#[allow(clippy::too_many_arguments)]
+pub fn decode_planes_region(
+    payload: &[u8],
+    shapes: &[(usize, usize)],
+    clips: &[Clip],
+    quality: u8,
+    layout: u8,
+    aq_on: bool,
+    regions: Option<BlockRegions>,
+) -> Vec<Plane> {
     let basis = Basis::new();
     let base = step_table(quality);
     let mut model = Model::new(layout, shapes.len());
@@ -253,16 +297,30 @@ pub fn decode_planes(
                 if !med {
                     prev = qz[0];
                 }
-                let mut coef = [[0.0f64; 8]; 8];
-                for k in 0..64 {
-                    let (u, v) = ZZ[k];
-                    coef[u][v] = qz[k] as f64 * step[u][v];
-                }
-                let clock = std::time::Instant::now();
-                let blk = idct_block_i16(&coef, clip.lo, clip.hi, &basis);
-                for y in 0..8 {
-                    let start = (by * 8 + y) * pw + bx * 8;
-                    plane[start..start + 8].copy_from_slice(&blk[y]);
+                let wanted = match regions {
+                    None => true,
+                    Some(r) => {
+                        let region = if pl == 0 { r.luma } else { r.chroma };
+                        region.hit(bx, by)
+                    }
+                };
+                if wanted {
+                    let mut coef = [[0.0f64; 8]; 8];
+                    for k in 0..64 {
+                        let (u, v) = ZZ[k];
+                        if qz[k] != 0 {
+                            coef[u][v] = qz[k] as f64 * step[u][v];
+                        }
+                    }
+                    let clock = std::time::Instant::now();
+                    let blk = idct_block_i16(&coef, clip.lo, clip.hi, &basis);
+                    for y in 0..8 {
+                        let start = (by * 8 + y) * pw + bx * 8;
+                        plane[start..start + 8].copy_from_slice(&blk[y]);
+                    }
+                    if profiling {
+                        t_idct += clock.elapsed().as_secs_f64();
+                    }
                 }
                 if profiling {
                     t_idct += clock.elapsed().as_secs_f64();

@@ -622,6 +622,112 @@ pub fn decode(data: &[u8]) -> Result<Image, String> {
     attach_alpha(solid, alpha, w, hh, channels)
 }
 
+/// Decode only a rectangle of the picture.
+///
+/// The coefficient stream is still walked in full - it is sequential - but the inverse
+/// transform and the pixel store are skipped for blocks outside the rectangle, and the
+/// colour conversion only produces the requested pixels. For a 512x512 crop of a
+/// 2048x2048 texture that is most of the work; what remains is the entropy decoding,
+/// which cannot be skipped.
+pub fn decode_region(data: &[u8], x: usize, y: usize, w: usize, h: usize) -> Result<Image, String> {
+    let header = probe(data)?;
+    if header.mode == mode::GRAY_LOSSLESS || header.mode == mode::RGB_LOSSLESS {
+        // Lossless uses a spatial predictor that needs every earlier pixel; a crop
+        // would have to decode all of it anyway, so do exactly that.
+        return crop(&decode(data)?, x, y, w, h);
+    }
+    let (offset, alpha) = alpha_segment(data, &header)?;
+    let payload = &data[offset..];
+    let (full_w, full_h) = (header.width, header.height);
+    let x1 = (x + w).min(full_w);
+    let y1 = (y + h).min(full_h);
+    if x >= full_w || y >= full_h || x1 <= x || y1 <= y {
+        return Err("the rectangle is outside the picture".into());
+    }
+
+    let shapes = shapes_for(&header);
+    let clips: Vec<_> = (0..shapes.len()).map(clip_for_plane).collect();
+    // In 4:2:0 a chroma block covers 16 pixels of the picture, in 4:4:4 it covers 8.
+    let cell = if header.mode == mode::RGB420_LOSSY { 16 } else { 8 };
+    let regions = codec::BlockRegions {
+        luma: codec::BlockRegion {
+            x0: x / 8,
+            y0: y / 8,
+            x1: (x1 + 7) / 8,
+            y1: (y1 + 7) / 8,
+        },
+        chroma: codec::BlockRegion {
+            x0: x / cell,
+            y0: y / cell,
+            x1: (x1 + cell - 1) / cell,
+            y1: (y1 + cell - 1) / cell,
+        },
+    };
+    let planes = codec::decode_planes_region(
+        payload, &shapes, &clips, header.quality, header.layout(), header.aq(), Some(regions),
+    );
+
+    let ow = x1 - x;
+    let oh = y1 - y;
+    let mut solid = Vec::with_capacity(ow * oh * 3);
+    match header.mode {
+        mode::GRAY_LOSSY => return Err("grey files are decoded whole; use decode".into()),
+        mode::RGB420_LOSSY => {
+            let (yp, cop, cgp) = (&planes[0], &planes[1], &planes[2]);
+            for yy in y..y1 {
+                for xx in x..x1 {
+                    let c = (yy / 2) * cop.w + xx / 2;
+                    let (r, g, b) = inv(yp.px[yy * yp.w + xx], cop.px[c], cgp.px[c]);
+                    solid.push(r.clamp(0, 255) as u8);
+                    solid.push(g.clamp(0, 255) as u8);
+                    solid.push(b.clamp(0, 255) as u8);
+                }
+            }
+        }
+        mode::RGB444_LOSSY => {
+            let (yp, cop, cgp) = (&planes[0], &planes[1], &planes[2]);
+            for yy in y..y1 {
+                for xx in x..x1 {
+                    let idx = yy * yp.w + xx;
+                    let (r, g, b) = inv(yp.px[idx], cop.px[idx], cgp.px[idx]);
+                    solid.push(r.clamp(0, 255) as u8);
+                    solid.push(g.clamp(0, 255) as u8);
+                    solid.push(b.clamp(0, 255) as u8);
+                }
+            }
+        }
+        other => return Err(format!("mode {} cannot be cropped", other)),
+    }
+
+    let alpha = alpha.map(|a| {
+        let mut small = Vec::with_capacity(ow * oh);
+        for yy in y..y1 {
+            for xx in x..x1 {
+                small.push(*a.get(yy * full_w + xx).unwrap_or(&255));
+            }
+        }
+        small
+    });
+    attach_alpha(solid, alpha, ow, oh, 3)
+}
+
+/// Copy a rectangle out of a decoded image.
+fn crop(img: &Image, x: usize, y: usize, w: usize, h: usize) -> Result<Image, String> {
+    let x1 = (x + w).min(img.width);
+    let y1 = (y + h).min(img.height);
+    if x >= img.width || y >= img.height || x1 <= x || y1 <= y {
+        return Err("the rectangle is outside the picture".into());
+    }
+    let (ow, oh) = (x1 - x, y1 - y);
+    let c = img.channels;
+    let mut out = Vec::with_capacity(ow * oh * c);
+    for yy in y..y1 {
+        let start = (yy * img.width + x) * c;
+        out.extend_from_slice(&img.data[start..start + ow * c]);
+    }
+    Image::new(ow, oh, c, out)
+}
+
 /// Locate the main payload, decoding the alpha segment on the way past.
 fn alpha_segment(data: &[u8], h: &Header) -> Result<(usize, Option<Vec<u8>>), String> {
     if !h.has_alpha() {
@@ -765,6 +871,44 @@ mod tests {
             }
         }
         Image::new(w, h, 3, px).unwrap()
+    }
+
+    #[test]
+    fn region_matches_a_crop_of_the_full_decode() {
+        // Decoding a rectangle must give the same pixels as decoding everything and
+        // cutting it out - otherwise "faster" is just "different".
+        let img = gradient(160, 120);
+        for (subsample, lossless) in [(true, false), (false, false), (true, true)] {
+            let blob = encode(
+                &img,
+                &Options {
+                    quality: 85,
+                    subsample_420: subsample,
+                    aq: AqMode::Off,
+                    version: VERSION,
+                    lossless,
+                },
+            )
+            .unwrap();
+            let full = decode(&blob).unwrap();
+            for (x, y, w, h) in [(0usize, 0usize, 160usize, 120usize), (37, 21, 64, 48), (128, 96, 64, 48)] {
+                let part = decode_region(&blob, x, y, w, h).unwrap();
+                let cw = w.min(full.width - x);
+                let ch = h.min(full.height - y);
+                assert_eq!((part.width, part.height), (cw, ch), "rect {x},{y} {w}x{h}");
+                for yy in 0..ch {
+                    for xx in 0..cw {
+                        let a = (yy * part.width + xx) * 3;
+                        let b = ((y + yy) * full.width + (x + xx)) * 3;
+                        assert_eq!(
+                            &part.data[a..a + 3],
+                            &full.data[b..b + 3],
+                            "rect {x},{y} {w}x{h} at {xx},{yy} (420={subsample}, lossless={lossless})"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     fn roundtrip(opts: Options) {
