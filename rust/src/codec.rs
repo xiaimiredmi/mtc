@@ -7,7 +7,7 @@
 use crate::aq;
 use crate::arith::{Dec, Enc};
 use crate::entropy::{dec_block, enc_block, Left, Model};
-use crate::transform::{dct_matrix, fdct, idct_f32, round_i32, step_table, Basis, ZZ};
+use crate::transform::{dct_matrix, fdct, idct_block_i16, step_table, Basis, ZZ};
 
 pub const CHROMA_GAIN: f64 = 1.35;
 
@@ -259,12 +259,10 @@ pub fn decode_planes(
                     coef[u][v] = qz[k] as f64 * step[u][v];
                 }
                 let clock = std::time::Instant::now();
-                let blk = idct_f32(&coef, &basis);
+                let blk = idct_block_i16(&coef, clip.lo, clip.hi, &basis);
                 for y in 0..8 {
-                    for x in 0..8 {
-                        let v = round_i32(blk[y][x]).clamp(clip.lo as i32, clip.hi as i32) as i16;
-                        plane[(by * 8 + y) * pw + bx * 8 + x] = v;
-                    }
+                    let start = (by * 8 + y) * pw + bx * 8;
+                    plane[start..start + 8].copy_from_slice(&blk[y]);
                 }
                 if profiling {
                     t_idct += clock.elapsed().as_secs_f64();

@@ -191,6 +191,7 @@ impl ResidualModel {
 
 /// Context for the `last` symbol, from the previous block's `last`.
 #[inline]
+#[inline(always)]
 fn last_ctx(layout: u8, left: &Left) -> usize {
     if layout == LAYOUT_CTX {
         (left.last >> 3).min(7)
@@ -269,6 +270,7 @@ pub fn enc_block(
     }
 }
 
+#[inline]
 pub fn dec_block(
     d: &mut Dec,
     m: &mut Model,

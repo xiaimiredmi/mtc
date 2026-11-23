@@ -186,6 +186,90 @@ pub fn idct_f32(coef: &[[f64; 8]; 8], basis: &Basis) -> [[f32; 8]; 8] {
     out
 }
 
+/// Inverse DCT straight to 8-bit pixels, four lanes at a time.
+///
+/// Same arithmetic as `idct_f32` - the two passes are linear combinations of basis
+/// rows with scalar coefficients - but two rows' halves ride in one register, and the
+/// rounding, clamping and narrowing to `i16` all happen in vectors. 512 scalar
+/// multiplies become 128 vector ones.
+///
+/// SSE2 is part of the x86-64 ABI, so there is nothing to detect at run time; on
+/// everything else the scalar path in `idct_block` is used instead.
+#[cfg(target_arch = "x86_64")]
+pub fn idct_block_i16(coef: &[[f64; 8]; 8], lo: i16, hi: i16, basis: &Basis) -> [[i16; 8]; 8] {
+    use std::arch::x86_64::*;
+    unsafe {
+        let m = &basis.m;
+        let mut blo = [_mm_setzero_ps(); 8];
+        let mut bhi = [_mm_setzero_ps(); 8];
+        for v in 0..8 {
+            blo[v] = _mm_setr_ps(m[v][0], m[v][1], m[v][2], m[v][3]);
+            bhi[v] = _mm_setr_ps(m[v][4], m[v][5], m[v][6], m[v][7]);
+        }
+
+        // Pass one: t[u][x] = sum_v coef[u][v] * m[v][x].
+        let mut tlo = [_mm_setzero_ps(); 8];
+        let mut thi = [_mm_setzero_ps(); 8];
+        for u in 0..8 {
+            let mut alo = _mm_setzero_ps();
+            let mut ahi = _mm_setzero_ps();
+            for v in 0..8 {
+                let c = coef[u][v] as f32;
+                if c != 0.0 {
+                    let cv = _mm_set1_ps(c);
+                    alo = _mm_add_ps(alo, _mm_mul_ps(cv, blo[v]));
+                    ahi = _mm_add_ps(ahi, _mm_mul_ps(cv, bhi[v]));
+                }
+            }
+            tlo[u] = alo;
+            thi[u] = ahi;
+        }
+
+        // Pass two: out[y][x] = sum_u m[u][y] * t[u][x].
+        let lo_f = _mm_set1_ps(lo as f32);
+        let hi_f = _mm_set1_ps(hi as f32);
+        let half = _mm_set1_ps(0.5);
+        let sign = _mm_set1_ps(-0.0);
+        let mut out = [[0i16; 8]; 8];
+        for y in 0..8 {
+            let mut alo = _mm_setzero_ps();
+            let mut ahi = _mm_setzero_ps();
+            for u in 0..8 {
+                let c = m[u][y];
+                if c != 0.0 {
+                    let cv = _mm_set1_ps(c);
+                    alo = _mm_add_ps(alo, _mm_mul_ps(cv, tlo[u]));
+                    ahi = _mm_add_ps(ahi, _mm_mul_ps(cv, thi[u]));
+                }
+            }
+            // Clamp while still in float, then round half away from zero (the same
+            // rounding the scalar path does) and narrow.
+            let alo = _mm_max_ps(_mm_min_ps(alo, hi_f), lo_f);
+            let ahi = _mm_max_ps(_mm_min_ps(ahi, hi_f), lo_f);
+            let alo = _mm_add_ps(alo, _mm_or_ps(_mm_and_ps(alo, sign), half));
+            let ahi = _mm_add_ps(ahi, _mm_or_ps(_mm_and_ps(ahi, sign), half));
+            let ilo = _mm_cvttps_epi32(alo);
+            let ihi = _mm_cvttps_epi32(ahi);
+            let packed = _mm_packs_epi32(ilo, ihi);
+            _mm_storeu_si128(out[y].as_mut_ptr() as *mut __m128i, packed);
+        }
+        out
+    }
+}
+
+/// Scalar fallback for targets without SSE2.
+#[cfg(not(target_arch = "x86_64"))]
+pub fn idct_block_i16(coef: &[[f64; 8]; 8], lo: i16, hi: i16, basis: &Basis) -> [[i16; 8]; 8] {
+    let blk = idct_f32(coef, basis);
+    let mut out = [[0i16; 8]; 8];
+    for y in 0..8 {
+        for x in 0..8 {
+            out[y][x] = round_i32(blk[y][x]).clamp(lo as i32, hi as i32) as i16;
+        }
+    }
+    out
+}
+
 pub fn base_weight(u: usize, v: usize) -> f64 {
     let f = (((u * u + v * v) as f64)).sqrt();
     1.0 + 0.30 * f.powf(1.15)
@@ -287,6 +371,33 @@ mod tests {
             }
         }
         assert!(worst < 0.05, "f32 idct differs by {}", worst);
+    }
+    #[test]
+    fn simd_idct_matches_the_scalar_path_exactly() {
+        // Not "close": the same pixels. The vector path only changes how the same
+        // arithmetic is packed.
+        let basis = Basis::new();
+        let steps = step_table(85);
+        let mut seed = 0xfeed_face_cafe_beefu64;
+        for _ in 0..300 {
+            let mut coef = [[0.0f64; 8]; 8];
+            for k in 0..64 {
+                seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                let r = ((seed >> 33) as i32 % 260) - 130;
+                let (u, v) = ZZ[k];
+                coef[u][v] = r as f64 * steps[u][v];
+            }
+            for clip in [(0i16, 255i16), (-300, 300)] {
+                let scalar = idct_f32(&coef, &basis);
+                let fast = idct_block_i16(&coef, clip.0, clip.1, &basis);
+                for y in 0..8 {
+                    for x in 0..8 {
+                        let a = round_i32(scalar[y][x]).clamp(clip.0 as i32, clip.1 as i32) as i16;
+                        assert_eq!(a, fast[y][x], "pixel {y},{x} clip {clip:?}");
+                    }
+                }
+            }
+        }
     }
     #[test]
     fn dct_roundtrip() {

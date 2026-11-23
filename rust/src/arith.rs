@@ -98,6 +98,7 @@ impl<'a> Dec<'a> {
     }
 
     #[inline]
+    #[inline(always)]
     fn next_byte(&mut self) -> u32 {
         let p = self.pos;
         self.pos = p + 1;
@@ -109,18 +110,28 @@ impl<'a> Dec<'a> {
     }
 
     #[inline]
+    /// One binary decision.
+    ///
+    /// The probability slot is read and written through a raw pointer: with a slice
+    /// index the same `idx` is checked twice per bit, and a bit is the inner loop of
+    /// the whole decoder. Callers only ever pass an index inside `probs` - the model
+    /// layout is fixed and the bases are computed from it - so the check is not
+    /// earning anything.
+    #[inline(always)]
     pub fn bit(&mut self, probs: &mut [i16], idx: usize) -> u32 {
-        let p = probs[idx] as u32;
+        debug_assert!(idx < probs.len());
+        let slot = unsafe { probs.get_unchecked_mut(idx) };
+        let p = *slot as u32;
         let bound = (self.range >> PROB_BITS) * p;
         let bit;
         if self.code < bound {
             self.range = bound;
-            probs[idx] = (p + ((PROB_TOTAL as u32 - p) >> MOVE_BITS)) as i16;
+            *slot = (p + ((PROB_TOTAL as u32 - p) >> MOVE_BITS)) as i16;
             bit = 0;
         } else {
             self.code -= bound;
             self.range -= bound;
-            probs[idx] = (p - (p >> MOVE_BITS)) as i16;
+            *slot = (p - (p >> MOVE_BITS)) as i16;
             bit = 1;
         }
         while self.range < TOP {
@@ -131,6 +142,7 @@ impl<'a> Dec<'a> {
     }
 }
 
+#[inline(always)]
 pub fn enc_tree(e: &mut Enc, probs: &mut [i16], base: usize, bits: u32, value: i32) {
     let mut node = 1usize;
     let mut i = bits as i32 - 1;
@@ -142,6 +154,7 @@ pub fn enc_tree(e: &mut Enc, probs: &mut [i16], base: usize, bits: u32, value: i
     }
 }
 
+#[inline(always)]
 pub fn dec_tree(d: &mut Dec, probs: &mut [i16], base: usize, bits: u32) -> u32 {
     let mut node = 1usize;
     let mut i = bits;
@@ -153,6 +166,7 @@ pub fn dec_tree(d: &mut Dec, probs: &mut [i16], base: usize, bits: u32) -> u32 {
     (node as u32) - (1u32 << bits)
 }
 
+#[inline(always)]
 pub fn enc_bits(e: &mut Enc, probs: &mut [i16], base: usize, count: u32, value: i32) {
     let mut i = count as i32 - 1;
     while i >= 0 {
@@ -162,6 +176,7 @@ pub fn enc_bits(e: &mut Enc, probs: &mut [i16], base: usize, count: u32, value: 
     }
 }
 
+#[inline(always)]
 pub fn dec_bits(d: &mut Dec, probs: &mut [i16], base: usize, count: u32) -> u32 {
     let mut v = 0u32;
     let mut i = count;
