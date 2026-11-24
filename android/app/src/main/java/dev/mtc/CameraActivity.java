@@ -49,7 +49,13 @@ import java.util.Locale;
 public class CameraActivity extends Activity {
     private static final int REQ_CAMERA = 1;
     /** Above this many pixels the still is captured smaller, to keep it snappy. */
-    private static final int MAX_PIXELS = 3264 * 2448;
+    /** Upper bound on still size while 8 MP is selected; the setting can raise it. */
+    private static final int MAX_PIXELS_DEFAULT = 3264 * 2448;
+    private static final int[][] SIZE_CHOICES = {
+            {3264 * 2448, 0},        // 8 MP, the default: cheap to decode on a phone
+            {4080 * 3060, 1},        // 12 MP
+            {Integer.MAX_VALUE, 2},  // whatever the sensor offers
+    };
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private HandlerThread worker;
@@ -59,6 +65,8 @@ public class CameraActivity extends Activity {
     private TextureView preview;
     private TextView hud;
     private TextView rangeToggle;
+    private TextView sizeToggle;
+    private TextView qualityToggle;
     private CameraDevice device;
     private CameraCaptureSession session;
     private ImageReader stills;
@@ -66,7 +74,9 @@ public class CameraActivity extends Activity {
     private Size previewSize = new Size(1280, 720);
     private String cameraId;
     private boolean busy;
-    private final int quality = 88;
+    /** Encoder quality; persisted, because 88 is a guess and 95 is often worth it. */
+    private int quality = 88;
+    private int sizeChoice;
     private int sensorOrientation = 90;
     /** BT.601 range of the frames this device hands out. Devices disagree, so
      *  the camera screen has a switch and the choice is remembered. */
@@ -159,6 +169,8 @@ public class CameraActivity extends Activity {
         rlp.setMargins(dp(16), 0, 0, dp(30));
         root.addView(rangeToggle, rlp);
         fullRange = getSharedPreferences("camera", MODE_PRIVATE).getBoolean("fullRange", false);
+        quality = getSharedPreferences("camera", MODE_PRIVATE).getInt("quality", 88);
+        sizeChoice = getSharedPreferences("camera", MODE_PRIVATE).getInt("size", 0);
         updateRangeLabel();
         rangeToggle.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -169,6 +181,52 @@ public class CameraActivity extends Activity {
                 updateRangeLabel();
             }
         });
+
+        // Resolution and quality decide what a photo looks like, so they are chips on
+        // the screen rather than buried settings. Both are remembered; changing the
+        // resolution reopens the camera because the still size is fixed per session.
+        sizeToggle = chip();
+        FrameLayout.LayoutParams sizeLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.START);
+        sizeLp.setMargins(dp(16), dp(64), 0, 0);
+        root.addView(sizeToggle, sizeLp);
+        sizeToggle.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                sizeChoice = (sizeChoice + 1) % SIZE_CHOICES.length;
+                getSharedPreferences("camera", MODE_PRIVATE).edit()
+                        .putInt("size", sizeChoice).apply();
+                updateSettingsLabels();
+                closeCamera();
+                openCamera();
+            }
+        });
+
+        qualityToggle = chip();
+        FrameLayout.LayoutParams qualityLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.START);
+        qualityLp.setMargins(dp(16), dp(104), 0, 0);
+        root.addView(qualityToggle, qualityLp);
+        qualityToggle.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                int[] steps = { 75, 85, 88, 95 };
+                int at = 0;
+                for (int i = 0; i < steps.length; i++) {
+                    if (steps[i] == quality) {
+                        at = i;
+                    }
+                }
+                quality = steps[(at + 1) % steps.length];
+                getSharedPreferences("camera", MODE_PRIVATE).edit()
+                        .putInt("quality", quality).apply();
+                updateSettingsLabels();
+                updateRangeLabel();
+            }
+        });
+        updateSettingsLabels();
 
         worker = new HandlerThread("mtc-camera");
         worker.start();
@@ -329,6 +387,12 @@ public class CameraActivity extends Activity {
         return best != null ? best : closest;
     }
 
+    /** Pixel cap for the still, from the current resolution setting. */
+    private long maxPixels() {
+        int choice = Math.max(0, Math.min(SIZE_CHOICES.length - 1, sizeChoice));
+        return SIZE_CHOICES[choice][0];
+    }
+
     private Size pickStillSize(StreamConfigurationMap map) {
         Size[] sizes = map == null ? null : map.getOutputSizes(ImageFormat.YUV_420_888);
         if (sizes == null || sizes.length == 0) {
@@ -344,7 +408,7 @@ public class CameraActivity extends Activity {
         });
         for (int i = 0; i < candidates.size(); i++) {
             Size s = candidates.get(i);
-            if ((long) s.getWidth() * s.getHeight() <= MAX_PIXELS) {
+            if ((long) s.getWidth() * s.getHeight() <= maxPixels()) {
                 return s;
             }
         }
@@ -383,6 +447,37 @@ public class CameraActivity extends Activity {
      * <p>The texture is the sensor's landscape buffer; a portrait phone needs a
      * quarter turn and then a scale that keeps the middle rather than stretching.
      */
+    /** A small translucent pill, the same shape as the colour-range switch. */
+    private TextView chip() {
+        TextView view = new TextView(this);
+        view.setTextColor(0xFFEDEDF0);
+        view.setTextSize(12);
+        view.setPadding(dp(16), dp(10), dp(16), dp(10));
+        view.setBackgroundColor(0x66000000);
+        return view;
+    }
+
+    private String sizeLabel() {
+        int choice = Math.max(0, Math.min(SIZE_CHOICES.length - 1, sizeChoice));
+        switch (choice) {
+            case 1:
+                return "分辨率：12MP";
+            case 2:
+                return "分辨率：最大";
+            default:
+                return "分辨率：8MP";
+        }
+    }
+
+    private void updateSettingsLabels() {
+        if (sizeToggle != null) {
+            sizeToggle.setText(sizeLabel());
+        }
+        if (qualityToggle != null) {
+            qualityToggle.setText("质量：q" + quality);
+        }
+    }
+
     private void updateRangeLabel() {
         rangeToggle.setText(fullRange ? "色彩范围：全 (0-255)" : "色彩范围：有限 (16-235)");
     }
