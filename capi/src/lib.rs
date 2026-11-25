@@ -209,8 +209,23 @@ fn to_rgb(img: &Image) -> Vec<u8> {
     }
 }
 
+/// Decode at the picture's own size. This is the whole interface a game needs: the
+/// engine scales the result itself, so there is no size argument to get wrong.
 #[no_mangle]
-pub unsafe extern "C" fn mtc_decode_rgba(
+pub unsafe extern "C" fn mtc_decode(
+    data: *const u8,
+    len: i32,
+    out: *mut *mut u8,
+    out_w: *mut i32,
+    out_h: *mut i32,
+) -> c_int {
+    decode_into(data, len, 0, out, out_w, out_h, false)
+}
+
+/// Same, but capped to `max_side` on the long edge. For mip chains and previews; a
+/// game that scales its own textures does not need it.
+#[no_mangle]
+pub unsafe extern "C" fn mtc_decode_scaled(
     data: *const u8,
     len: i32,
     max_side: i32,
@@ -221,16 +236,16 @@ pub unsafe extern "C" fn mtc_decode_rgba(
     decode_into(data, len, max_side, out, out_w, out_h, false)
 }
 
+/// Same, three bytes per pixel, for opaque textures.
 #[no_mangle]
 pub unsafe extern "C" fn mtc_decode_rgb(
     data: *const u8,
     len: i32,
-    max_side: i32,
     out: *mut *mut u8,
     out_w: *mut i32,
     out_h: *mut i32,
 ) -> c_int {
-    decode_into(data, len, max_side, out, out_w, out_h, true)
+    decode_into(data, len, 0, out, out_w, out_h, true)
 }
 
 /// Decode one rectangle of the picture.

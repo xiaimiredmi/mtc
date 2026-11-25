@@ -7,35 +7,33 @@ at load time. No dependencies, no global state, nothing on disk.
 #include "mtc.h"
 
 bool load_texture(const uint8_t* file, int32_t size) {
-    MtcInfo info;
-    if (mtc_info(file, size, &info) != MTC_OK) {
-        log("mtc: %s", mtc_last_error());
-        return false;
-    }
-
     uint8_t* rgba; int32_t w, h;
-    if (mtc_decode_rgba(file, size, 0, &rgba, &w, &h) != MTC_OK) {
+    if (mtc_decode(file, size, &rgba, &w, &h) != MTC_OK) {
         log("mtc: %s", mtc_last_error());
         return false;
     }
-
-    upload_to_gpu(rgba, w, h);   // your engine's texture upload
+    upload_to_gpu(rgba, w, h);   // your engine's texture upload, at native size
     mtc_free(rgba);
     return true;
 }
 ```
+
+There is deliberately no size argument: the picture comes back at its own size and the
+engine scales it. Scaling inside the codec is a separate call
+(`mtc_decode_scaled`) for mip chains, not something the caller has to think about.
 
 ## Why it is shaped like this
 
 * **One call per image.** `mtc_decode_rgba` returns a buffer you own; `mtc_free` takes
   only the pointer, because the length is stored in front of the data. Forgetting to
   pass a size back is how C APIs usually leak.
-* **`max_side` for mips and previews.** `mtc_decode_rgba(file, size, 256, ...)` decodes
-  straight to at most 256 px on the long side. It does not decode full size and shrink;
-  a 12 MP photo never allocates a 12 MP buffer. Use it to build a mip chain that costs
-  a fraction of the memory of the base level.
+* **No size knob.** `mtc_decode` returns the picture at its own size; the engine scales
+  it. If you do want the codec to shrink while decoding - for a mip chain, where it
+  builds the small picture directly instead of decoding then resizing - `mtc_decode_scaled`
+  takes a maximum long edge.
 * **`mtc_decode_rgb`** gives 3 bytes per pixel. For opaque textures that is a third
   less to move to the GPU.
+* **`mtc_decode_region`** decodes one rectangle and skips the transform elsewhere.
 * **Thread safe.** No shared state; decode different images on different worker
   threads. The error message is per thread.
 * **No unwinding.** Every entry point catches panics and returns `MTC_ERR_INTERNAL`, so

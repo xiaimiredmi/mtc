@@ -67,20 +67,29 @@ typedef struct MtcInfo {
 MTC_API int32_t mtc_info(const uint8_t* data, int32_t len, MtcInfo* out);
 
 /*
- * Decode to RGBA8, row-major, top row first, 4 bytes per pixel.
- *
- * `max_side` > 0 decodes straight to a smaller picture whose longest side is at most
- * that; 0 decodes full size. The scaled path builds the small picture directly
- * instead of decoding and shrinking, so a thumbnail of a 12 MP photo does not cost a
- * 12 MP buffer - use it for mip chains and for level-of-detail previews.
+ * Decode at the picture's own size: RGBA8, row-major, top row first, 4 bytes per
+ * pixel. This is the whole interface a game needs - scale the result yourself in the
+ * engine, and there is no size argument to get wrong.
  */
-MTC_API int32_t mtc_decode_rgba(const uint8_t* data, int32_t len, int32_t max_side,
-                                uint8_t** out_rgba, int32_t* out_w, int32_t* out_h);
+MTC_API int32_t mtc_decode(const uint8_t* data, int32_t len,
+                           uint8_t** out_rgba, int32_t* out_w, int32_t* out_h);
 
-/* Same, but 3 bytes per pixel. Alpha, if the file had any, is composited over black
- * and dropped. Use this for opaque textures: it is a third less memory to move. */
-MTC_API int32_t mtc_decode_rgb(const uint8_t* data, int32_t len, int32_t max_side,
+/*
+ * Same, three bytes per pixel. Alpha, if the file had any, is composited over black
+ * and dropped. A third less to upload, which matters for opaque textures.
+ */
+MTC_API int32_t mtc_decode_rgb(const uint8_t* data, int32_t len,
                                uint8_t** out_rgb, int32_t* out_w, int32_t* out_h);
+
+/*
+ * Extras, for when the engine does not want to do it itself:
+ *
+ *   mtc_decode_scaled  - cap the long edge at `max_side`, building the small picture
+ *                        directly (a 12 MP photo never allocates a 12 MP buffer).
+ *   mtc_decode_region  - decode one rectangle and skip the transform elsewhere.
+ */
+MTC_API int32_t mtc_decode_scaled(const uint8_t* data, int32_t len, int32_t max_side,
+                                  uint8_t** out_rgba, int32_t* out_w, int32_t* out_h);
 
 /*
  * Decode one rectangle. Same contract as mtc_decode_rgba, but only the pixels inside

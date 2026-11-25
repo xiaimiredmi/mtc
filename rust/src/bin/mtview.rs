@@ -22,12 +22,6 @@ use mtc::container;
 use mtc::imgio;
 
 const BG: egui::Color32 = egui::Color32::WHITE;
-const FG: egui::Color32 = egui::Color32::from_rgb(26, 26, 26);
-const DIM: egui::Color32 = egui::Color32::from_rgb(107, 107, 107);
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(232, 71, 107);
-const BAR_BG: egui::Color32 = egui::Color32::from_rgb(247, 247, 248);
-const CHIP_BG: egui::Color32 = egui::Color32::from_rgb(246, 246, 247);
-const CHIP_FG: egui::Color32 = egui::Color32::from_rgb(90, 90, 95);
 /// Highest zoom the wheel may reach.
 const MAX_ZOOM: f32 = 8.0;
 
@@ -137,6 +131,7 @@ impl Geometry {
         self.clamp_pan();
     }
 
+    #[allow(dead_code)] // asserted by the geometry tests`n
     fn label(&self) -> String {
         let pct = (self.scale * 100.0).round() as i32;
         if self.fit_mode {
@@ -153,6 +148,7 @@ struct Shot {
     pixels: egui::ColorImage,
     width: usize,
     height: usize,
+    #[allow(dead_code)] // kept for the console summary
     meta: String,
     title: String,
 }
@@ -298,82 +294,6 @@ impl MtView {
         self.nearest = nearest;
         self.texture = Some(ctx.load_texture("picture", self.shot.pixels.clone(), options));
     }
-
-    fn header(&self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("head")
-            .frame(
-                egui::Frame::none()
-                    .fill(BG)
-                    .inner_margin(egui::Margin::symmetric(20.0, 12.0)),
-            )
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    let (rect, _) =
-                        ui.allocate_exact_size(egui::vec2(5.0, 22.0), egui::Sense::hover());
-                    ui.painter()
-                        .rect_filled(rect, egui::Rounding::same(0.0), ACCENT);
-                    ui.add_space(10.0);
-                    ui.label(
-                        egui::RichText::new(&self.shot.title)
-                            .color(FG)
-                            .size(15.0)
-                            .strong(),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(egui::RichText::new(&self.shot.meta).color(DIM).size(12.0));
-                    });
-                });
-            });
-    }
-
-    fn footer(&self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("foot")
-            .frame(
-                egui::Frame::none()
-                    .fill(BAR_BG)
-                    .inner_margin(egui::Margin::symmetric(20.0, 9.0)),
-            )
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(
-                            "wheel zoom  ·  drag to pan  ·  double-click to fit  ·  1 = 100%  ·  Esc closes",
-                        )
-                        .color(DIM)
-                        .size(12.0),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "{}x{}",
-                                self.shot.width, self.shot.height
-                            ))
-                            .color(DIM)
-                            .size(12.0)
-                            .monospace(),
-                        );
-                    });
-                });
-            });
-    }
-
-    fn zoom_chip(&self, ui: &egui::Ui, canvas: egui::Rect) {
-        let label = self.geom.label();
-        let galley =
-            ui.painter()
-                .layout_no_wrap(label, egui::FontId::monospace(12.0), CHIP_FG);
-        let chip = egui::Rect::from_min_size(
-            egui::pos2(
-                canvas.right() - galley.size().x - 26.0,
-                canvas.top() + 12.0,
-            ),
-            egui::vec2(galley.size().x + 14.0, galley.size().y + 8.0),
-        );
-        ui.painter()
-            .rect_filled(chip, egui::Rounding::same(4.0), CHIP_BG);
-        ui.painter()
-            .galley(chip.min + egui::vec2(7.0, 4.0), galley, CHIP_FG);
-    }
 }
 
 impl eframe::App for MtView {
@@ -400,9 +320,8 @@ impl eframe::App for MtView {
             ctx.request_repaint_after(Duration::from_millis(40));
         }
 
-        self.header(ctx);
-        self.footer(ctx);
-
+        // No chrome: the window is the picture. Zoom, pan and fit are still there,
+        // they just have no toolbar to sit in.
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(BG))
             .show(ctx, |ui| {
@@ -442,7 +361,6 @@ impl eframe::App for MtView {
                         egui::Color32::WHITE,
                     );
                 }
-                self.zoom_chip(ui, rect);
             });
     }
 }

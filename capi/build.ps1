@@ -51,7 +51,9 @@ public static class MtcNative {
     [DllImport("mtc", CallingConvention = CallingConvention.Cdecl)]
     public static extern int mtc_info(byte[] data, int len, out Info info);
     [DllImport("mtc", CallingConvention = CallingConvention.Cdecl)]
-    public static extern int mtc_decode_rgba(byte[] data, int len, int maxSide, out IntPtr rgba, out int w, out int h);
+    public static extern int mtc_decode(byte[] data, int len, out IntPtr rgba, out int w, out int h);
+    [DllImport("mtc", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int mtc_decode_scaled(byte[] data, int len, int maxSide, out IntPtr rgba, out int w, out int h);
     [DllImport("mtc", CallingConvention = CallingConvention.Cdecl)]
     public static extern void mtc_free(IntPtr p);
     [DllImport("mtc", CallingConvention = CallingConvention.Cdecl)]
@@ -92,7 +94,7 @@ $rc = [MtcNative]::mtc_info($blob, $blob.Length, [ref]$info)
 Write-Host ("  info rc={0} {1}x{2} mode={3} q={4} v={5}" -f $rc, $info.width, $info.height, $info.mode, $info.quality, $info.version)
 
 $rgba = [IntPtr]::Zero; $w = 0; $h = 0
-$rc = [MtcNative]::mtc_decode_rgba($blob, $blob.Length, 0, [ref]$rgba, [ref]$w, [ref]$h)
+$rc = [MtcNative]::mtc_decode($blob, $blob.Length, [ref]$rgba, [ref]$w, [ref]$h)
 if ($rc -ne 0) { throw ("decode failed: " + [Runtime.InteropServices.Marshal]::PtrToStringAnsi([MtcNative]::mtc_last_error())) }
 $roundtrip = New-Object byte[] ($w * $h * 4)
 [Runtime.InteropServices.Marshal]::Copy($rgba, $roundtrip, 0, $roundtrip.Length)
@@ -109,7 +111,7 @@ if ($w -ne 64 -or $h -ne 48) { throw 'decoded size does not match' }
 if ($worst -gt 12) { throw "error too large for q85: $worst" }
 
 $small = [IntPtr]::Zero; $sw = 0; $sh = 0
-$rc = [MtcNative]::mtc_decode_rgba($blob, $blob.Length, 24, [ref]$small, [ref]$sw, [ref]$sh)
+$rc = [MtcNative]::mtc_decode_scaled($blob, $blob.Length, 24, [ref]$small, [ref]$sw, [ref]$sh)
 [MtcNative]::mtc_free($small)
 Write-Host ("  max_side=24 -> {0}x{1} (rc={2})" -f $sw, $sh, $rc)
 Write-Host 'all checks passed'
