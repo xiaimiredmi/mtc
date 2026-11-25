@@ -67,6 +67,7 @@ public class CameraActivity extends Activity {
     private TextView rangeToggle;
     private TextView sizeToggle;
     private TextView qualityToggle;
+    private TextView rotationToggle;
     private CameraDevice device;
     private CameraCaptureSession session;
     private ImageReader stills;
@@ -77,6 +78,8 @@ public class CameraActivity extends Activity {
     /** Encoder quality; persisted, because 88 is a guess and 95 is often worth it. */
     private int quality = 88;
     private int sizeChoice;
+    /** -1 means "use the sensor", otherwise a forced clockwise quarter turn. */
+    private int rotationOverride = -1;
     private int sensorOrientation = 90;
     /** BT.601 range of the frames this device hands out. Devices disagree, so
      *  the camera screen has a switch and the choice is remembered. */
@@ -171,6 +174,7 @@ public class CameraActivity extends Activity {
         fullRange = getSharedPreferences("camera", MODE_PRIVATE).getBoolean("fullRange", false);
         quality = getSharedPreferences("camera", MODE_PRIVATE).getInt("quality", 88);
         sizeChoice = getSharedPreferences("camera", MODE_PRIVATE).getInt("size", 0);
+        rotationOverride = getSharedPreferences("camera", MODE_PRIVATE).getInt("rotation", -1);
         updateRangeLabel();
         rangeToggle.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -197,7 +201,43 @@ public class CameraActivity extends Activity {
                 sizeChoice = (sizeChoice + 1) % SIZE_CHOICES.length;
                 getSharedPreferences("camera", MODE_PRIVATE).edit()
                         .putInt("size", sizeChoice).apply();
+                rotationToggle = chip();
+        FrameLayout.LayoutParams rotationLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.START);
+        rotationLp.setMargins(dp(16), dp(144), 0, 0);
+        root.addView(rotationToggle, rotationLp);
+        rotationToggle.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                // auto -> 0 -> 90 -> 180 -> 270 -> auto
+                int next;
+                switch (rotationOverride) {
+                    case -1:
+                        next = 0;
+                        break;
+                    case 0:
+                        next = 90;
+                        break;
+                    case 90:
+                        next = 180;
+                        break;
+                    case 180:
+                        next = 270;
+                        break;
+                    default:
+                        next = -1;
+                        break;
+                }
+                rotationOverride = next;
+                getSharedPreferences("camera", MODE_PRIVATE).edit()
+                        .putInt("rotation", next).apply();
                 updateSettingsLabels();
+                closeCamera();
+                openCamera();
+            }
+        });
+        updateSettingsLabels();
                 closeCamera();
                 openCamera();
             }
@@ -222,8 +262,80 @@ public class CameraActivity extends Activity {
                 quality = steps[(at + 1) % steps.length];
                 getSharedPreferences("camera", MODE_PRIVATE).edit()
                         .putInt("quality", quality).apply();
+                rotationToggle = chip();
+        FrameLayout.LayoutParams rotationLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.START);
+        rotationLp.setMargins(dp(16), dp(144), 0, 0);
+        root.addView(rotationToggle, rotationLp);
+        rotationToggle.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                // auto -> 0 -> 90 -> 180 -> 270 -> auto
+                int next;
+                switch (rotationOverride) {
+                    case -1:
+                        next = 0;
+                        break;
+                    case 0:
+                        next = 90;
+                        break;
+                    case 90:
+                        next = 180;
+                        break;
+                    case 180:
+                        next = 270;
+                        break;
+                    default:
+                        next = -1;
+                        break;
+                }
+                rotationOverride = next;
+                getSharedPreferences("camera", MODE_PRIVATE).edit()
+                        .putInt("rotation", next).apply();
                 updateSettingsLabels();
+                closeCamera();
+                openCamera();
+            }
+        });
+        updateSettingsLabels();
                 updateRangeLabel();
+            }
+        });
+        rotationToggle = chip();
+        FrameLayout.LayoutParams rotationLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.START);
+        rotationLp.setMargins(dp(16), dp(144), 0, 0);
+        root.addView(rotationToggle, rotationLp);
+        rotationToggle.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                // auto -> 0 -> 90 -> 180 -> 270 -> auto
+                int next;
+                switch (rotationOverride) {
+                    case -1:
+                        next = 0;
+                        break;
+                    case 0:
+                        next = 90;
+                        break;
+                    case 90:
+                        next = 180;
+                        break;
+                    case 180:
+                        next = 270;
+                        break;
+                    default:
+                        next = -1;
+                        break;
+                }
+                rotationOverride = next;
+                getSharedPreferences("camera", MODE_PRIVATE).edit()
+                        .putInt("rotation", next).apply();
+                updateSettingsLabels();
+                closeCamera();
+                openCamera();
             }
         });
         updateSettingsLabels();
@@ -398,6 +510,17 @@ public class CameraActivity extends Activity {
         if (sizes == null || sizes.length == 0) {
             return new Size(1920, 1080);
         }
+        // Aspect ratio matters as much as pixel count. Choosing the largest area under
+        // the cap alone produced a 4096x1844 stream on one device - 2.2:1, a
+        // letterboxed strip rather than a photograph. Prefer 4:3, then 16:9.
+        Size squarish = pickByAspect(sizes, 4.0 / 3.0);
+        if (squarish != null) {
+            return squarish;
+        }
+        Size wide = pickByAspect(sizes, 16.0 / 9.0);
+        if (wide != null) {
+            return wide;
+        }
         List<Size> candidates = new ArrayList<Size>(Arrays.asList(sizes));
         Collections.sort(candidates, new Comparator<Size>() {
             @Override
@@ -413,6 +536,26 @@ public class CameraActivity extends Activity {
             }
         }
         return candidates.get(candidates.size() - 1);
+    }
+
+    /** Largest size of the wanted shape under the pixel cap, or null. */
+    private Size pickByAspect(Size[] sizes, double want) {
+        Size best = null;
+        long bestPixels = 0;
+        for (int i = 0; i < sizes.length; i++) {
+            Size s = sizes[i];
+            double aspect = (double) s.getWidth() / s.getHeight();
+            if (Math.abs(aspect - want) > 0.03) {
+                continue;
+            }
+            long pixels = (long) s.getWidth() * s.getHeight();
+            if (pixels > maxPixels() || pixels <= bestPixels) {
+                continue;
+            }
+            best = s;
+            bestPixels = pixels;
+        }
+        return best;
     }
 
     /** Clockwise quarter turn that puts a still upright, in degrees. */
@@ -435,6 +578,13 @@ public class CameraActivity extends Activity {
         // The sensor is mounted at an angle. A back camera needs that angle
         // clockwise; a front camera is mounted the other way round and then
         // mirrored, so its turn runs the opposite way.
+        if (rotationOverride >= 0) {
+            // Some cameras - and every container I have seen - report a sensor angle
+            // that does not match the stream they hand over. The override is the way
+            // out: pick the turn that looks right and it applies to preview and photo
+            // alike, so they cannot disagree.
+            return rotationOverride;
+        }
         if (front) {
             return ((360 - sensorOrientation) + display) % 360;
         }
@@ -475,6 +625,11 @@ public class CameraActivity extends Activity {
         }
         if (qualityToggle != null) {
             qualityToggle.setText("质量：q" + quality);
+        }
+        if (rotationToggle != null) {
+            rotationToggle.setText(rotationOverride < 0
+                    ? "方向：自动"
+                    : "方向：" + rotationOverride + "°");
         }
     }
 
