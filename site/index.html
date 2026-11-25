@@ -6,6 +6,8 @@
 <title>MTC · 自己写的图片编解码器</title>
 <meta name="description" content="MTC 是从零实现的图片编解码器：8×8 DCT、算术编码、自适应量化、无损与精确 alpha。整站演示在浏览器里用同一份 Rust 代码（WebAssembly）实时编解码。">
 <link rel="stylesheet" href="styles.css">
+<link rel="preload" href="mtc.wasm" as="fetch">
+<link rel="preload" href="assets/sample.png" as="image">
 <link rel="icon" href="assets/icon.png">
 </head>
 <body>
@@ -217,6 +219,9 @@
 
 <footer>
   <span>MTC · MIT</span>
+  <span class="feedback">
+    反馈 / 建议：<a href="mailto:xiaomitv14@outlook.com?subject=MTC">xiaomitv14@outlook.com</a>
+  </span>
   <span id="footnote">页面上的编码器是 WebAssembly，和命令行走同一份代码。</span>
 </footer>
 

@@ -246,7 +246,11 @@ pub fn decode_planes_region(
     let mut dec = Dec::new(payload);
     // Time the two halves of a block separately: the entropy decoder and the
     // transform. Enabled by an environment variable so it costs nothing in a game.
-    let profiling = std::env::var_os("MTCODEC_PROFILE").is_some();
+    // `Instant::now()` panics on wasm32-unknown-unknown: there is no clock there, and a
+    // panic in wasm is an `unreachable` trap the page sees as "出错了". The profiler is
+    // therefore off on wasm and its clock is only taken when it is on.
+    let profiling = !cfg!(target_arch = "wasm32")
+        && std::env::var_os("MTCODEC_PROFILE").is_some();
     let mut t_entropy = 0f64;
     let mut t_idct = 0f64;
     let mut out = Vec::with_capacity(shapes.len());
@@ -287,10 +291,14 @@ pub fn decode_planes_region(
                 if med {
                     prev = dc_predict(&up, &cur, bx, by);
                 }
-                let clock = std::time::Instant::now();
+                let clock = if profiling {
+                    Some(std::time::Instant::now())
+                } else {
+                    None
+                };
                 let qz = dec_block(&mut dec, &mut model, pl, prev, &left);
-                if profiling {
-                    t_entropy += clock.elapsed().as_secs_f64();
+                if let Some(start) = clock {
+                    t_entropy += start.elapsed().as_secs_f64();
                 }
                 left = Left::of(&qz);
                 cur[bx] = qz[0];
@@ -312,18 +320,19 @@ pub fn decode_planes_region(
                             coef[u][v] = qz[k] as f64 * step[u][v];
                         }
                     }
-                    let clock = std::time::Instant::now();
+                    let clock = if profiling {
+                        Some(std::time::Instant::now())
+                    } else {
+                        None
+                    };
                     let blk = idct_block_i16(&coef, clip.lo, clip.hi, &basis);
                     for y in 0..8 {
                         let start = (by * 8 + y) * pw + bx * 8;
                         plane[start..start + 8].copy_from_slice(&blk[y]);
                     }
-                    if profiling {
-                        t_idct += clock.elapsed().as_secs_f64();
+                    if let Some(start) = clock {
+                        t_idct += start.elapsed().as_secs_f64();
                     }
-                }
-                if profiling {
-                    t_idct += clock.elapsed().as_secs_f64();
                 }
             }
             if med {

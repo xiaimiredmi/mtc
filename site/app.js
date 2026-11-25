@@ -4,6 +4,16 @@
 import { loadCodec, parseHeader, hexDump, psnr, humanBytes } from "./codec.js";
 
 const $ = (id) => document.getElementById(id);
+
+// Surface failures in the tab title: this page has no console a visitor can open, and
+// a silent half-loaded demo is the worst possible outcome.
+window.addEventListener("error", (event) => {
+  document.title = "MTC · 出错：" + (event.message || "script error");
+});
+window.addEventListener("unhandledrejection", (event) => {
+  const reason = event.reason;
+  document.title = "MTC · 出错：" + (reason && reason.message ? reason.message : reason);
+});
 const params = new URLSearchParams(location.search);
 // `?auto` is the headless check: skip the reveal animations and counters so a
 // screenshot shows the finished state instead of a frame mid-transition.
@@ -149,7 +159,7 @@ if (params.has("auto") && params.get("scroll")) {
     setTimeout(() => target.scrollIntoView({ block: "start", behavior: "instant" }), 500);
   }
 }
-const MAX_DEMO_SIDE = 1280; // the browser demo works on a sane size
+const MAX_DEMO_SIDE = 1024; // smaller than before: the demo is about behaviour, and 1024 is 36% less work
 
 const state = {
   codec: null,
@@ -163,6 +173,10 @@ const state = {
 };
 
 // ─────────────────────────────── boot ──────────────────────────────────
+// Prefetch while the visitor is still reading the hero: by the time they press
+// "用样图试试" there is nothing left to wait for. Both requests start together.
+const samplePrefetch = fetch("assets/sample.png").then((r) => (r.ok ? r.blob() : null)).catch(() => null);
+
 const ready = (async () => {
   try {
     state.codec = await loadCodec();
@@ -333,6 +347,29 @@ function rgbaOf(source) {
   return source.rgba;
 }
 
+/** A picture drawn in a canvas: no network, so the demo can be checked offline. */
+function syntheticImage() {
+  const width = 320;
+  const height = 240;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const gradient = ctx.createLinearGradient(0, 0, width, height);
+  gradient.addColorStop(0, "#1f6feb");
+  gradient.addColorStop(0.5, "#8b5cf6");
+  gradient.addColorStop(1, "#f97316");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "rgba(255,255,255,.85)";
+  for (let i = 0; i < 24; i++) {
+    ctx.beginPath();
+    ctx.arc((i * 53) % width, (i * 97) % height, 6 + (i % 5) * 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  return { data: ctx.getImageData(0, 0, width, height).data, width, height };
+}
+
 // ───────────────────────────── the pipeline ────────────────────────────
 async function run() {
   if (!state.codec || !state.source || state.busy) return;
@@ -370,9 +407,13 @@ async function run() {
 
     const header = parseHeader(encoded.bytes);
     $("hex").textContent = describe(header, encoded.bytes);
-    await drawCurve();
+    // The curve costs four more encode+decode rounds. Paint the result first, then
+    // spend that time in the background so the page never feels stuck.
+    scheduleCurve();
   } catch (err) {
     $("stageNote").textContent = "出错了：" + err.message;
+    document.title = "MTC · 出错：" + err.message;
+    console.error("run", err);
   } finally {
     state.busy = false;
     window.__mtcLast = {
@@ -408,7 +449,18 @@ function drawImage(canvas, image) {
 }
 
 // ───────────────────────── rate / distortion curve ─────────────────────
-const CURVE_QUALITIES = [30, 45, 60, 75, 85, 92];
+const CURVE_QUALITIES = [35, 60, 80, 95];
+
+let curveTimer = null;
+
+/** Draw the rate/distortion curve once the page is idle. */
+function scheduleCurve() {
+  clearTimeout(curveTimer);
+  curveTimer = setTimeout(() => {
+    const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 120));
+    idle(() => { drawCurve(); });
+  }, 260);
+}
 
 async function drawCurve() {
   const canvas = $("curve");
@@ -529,11 +581,33 @@ $("file").addEventListener("change", async (event) => {
 $("sample").addEventListener("click", async () => {
   $("stageNote").textContent = "载入样图…";
   try {
-    const response = await fetch("assets/sample.png");
-    const blob = await response.blob();
-    await loadImage(new File([blob], "sample.png", { type: "image/png" }), "样图");
+    // Never leave the button spinning: the prefetch gets three seconds, then a picture
+    // drawn locally stands in. A visitor on a bad connection still sees the codec work.
+    const blob = await Promise.race([
+      samplePrefetch,
+      new Promise((resolve) => setTimeout(() => resolve(null), 3000)),
+    ]);
+    if (blob) {
+      await loadImage(new File([blob], "sample.png", { type: "image/png" }), "样图");
+    } else {
+      const image = syntheticImage();
+      state.source = {
+        rgba: image.data,
+        width: image.width,
+        height: image.height,
+        channels: 3,
+        label: "自检图",
+        scaled: false,
+        pixelBytes: image.data.length * 3 / 4,
+      };
+      $("drop").classList.add("gone");
+      $("stageNote").textContent = "样图没能在 3 秒内加载，用一张本地生成的图代替（编码器是真的）";
+      await run();
+    }
   } catch (err) {
     $("stageNote").textContent = "样图加载失败：" + err.message;
+    document.title = "MTC · 样图加载失败：" + err.message;
+    console.error("sample", err);
   }
 });
 
@@ -587,7 +661,23 @@ window.addEventListener("resize", () => { if (state.source) drawCurve(); });
   if (!state.codec) return;
   if (params.has("auto")) {
     const what = params.get("auto");
-    if (what === "mtc") {
+    if (what === "synth") {
+      // Deterministic check with no network at all.
+      const image = syntheticImage();
+      const opaque = true;
+      state.source = {
+        rgba: image.data,
+        width: image.width,
+        height: image.height,
+        channels: opaque ? 3 : 4,
+        label: "自检",
+        scaled: false,
+        pixelBytes: image.data.length * 3 / 4,
+      };
+      $("drop").classList.add("gone");
+      $("stageNote").textContent = "自检图：" + image.width + "×" + image.height;
+      await run();
+    } else if (what === "mtc") {
       const response = await fetch("assets/legacy.mtc");
       await loadMtc(new Uint8Array(await response.arrayBuffer()), "legacy.mtc");
     } else {
