@@ -113,6 +113,14 @@ public final class Mtc {
         }
     }
 
+    /** Thumbnail of bytes already in memory, or null. */
+    public static Bitmap thumbnail(byte[] data, int maxSide) {
+        if (data == null) {
+            return null;
+        }
+        return toBitmap(decodeRgba(data, maxSide));
+    }
+
     /** Thumbnail of a file, or null. Skips the JPEG path entirely. */
     public static Bitmap thumbnail(File file, int maxSide) {
         byte[] data = read(file);

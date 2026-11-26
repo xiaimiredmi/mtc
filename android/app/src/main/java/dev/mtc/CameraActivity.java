@@ -1450,7 +1450,7 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
                         toast(Store.human(encoded.length) + " · " + ms + " ms · "
                                 + size.getWidth() + "×" + size.getHeight());
                     }
-                    loadThumb(name);
+                    loadThumb();
                 }
             });
         } catch (Exception e) {
@@ -1670,7 +1670,7 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
                     + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date())
                     + ".mtc");
             savePicture(name, encoded);
-            loadThumb(name);
+            loadThumb();
             toast((shot.mode == 1 ? "HDR " : "夜景 ") + n + " 帧 → "
                     + Store.human(encoded.length) + " · 合成 " + ms + " ms");
         } catch (Exception e) {
@@ -1718,57 +1718,80 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
                 out[at + 2] = (byte) Math.max(0, Math.min(255, b));
             }
         }
-    }    private void loadThumb(String name) {
+    }    /** The newest picture's thumbnail, from wherever it landed. */
+    private void loadThumb() {
         try {
-            File file = new File(Store.dir(this), name);
-            if (!file.exists()) {
+            java.util.List<Store.Photo> photos = Store.listPhotos(this);
+            if (photos.isEmpty()) {
                 return;
             }
-            if (!Store.hasThumbnail(file)) {
-                Store.writeThumbnail(file, 320);
-            }
-            if (Store.hasThumbnail(file)) {
-                android.graphics.Bitmap bmp = BitmapFactory.decodeFile(
-                        Store.thumbFile(file).getAbsolutePath());
-                if (bmp != null) {
-                    thumb.setImageBitmap(bmp);
-                }
+            android.graphics.Bitmap bmp = Store.thumbnail(this, photos.get(0), dp(52) * 2);
+            if (bmp != null) {
+                thumb.setImageBitmap(bmp);
             }
         } catch (Exception ignored) {
         }
     }
-
+    /**
+     * Write a picture into the public album, and say where it went.
+     *
+     * <p>DCIM/MTC through MediaStore, tried three ways: as an image with the codec's own
+     * MIME type, as a generic file, then as a download. Some ROMs and containers refuse
+     * one or another, and a picture that only this app can open is not saved - so the
+     * private folder is the last resort and the toast admits it rather than pretending.
+     */
     private String savePicture(String name, byte[] bytes) {
-        writePrivate(name, bytes);
-        if (Build.VERSION.SDK_INT >= 29) {
-            try {
-                ContentValues values = new ContentValues();
-                values.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
-                values.put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream");
-                values.put(MediaStore.MediaColumns.RELATIVE_PATH, PUBLIC_ALBUM);
-                values.put(MediaStore.MediaColumns.IS_PENDING, 1);
-                ContentResolver resolver = getContentResolver();
-                Uri target = resolver.insert(
-                        MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values);
-                if (target != null) {
-                    OutputStream out = resolver.openOutputStream(target);
-                    try {
-                        out.write(bytes);
-                    } finally {
-                        out.close();
-                    }
-                    values.clear();
-                    values.put(MediaStore.MediaColumns.IS_PENDING, 0);
-                    resolver.update(target, values, null, null);
-                    return PUBLIC_ALBUM + "/" + name;
-                }
-            } catch (Exception ignored) {
-            }
+        Uri target = writeMedia(MediaStore.Images.Media.getContentUri(
+                        MediaStore.VOLUME_EXTERNAL_PRIMARY), name, "image/x-mtc", bytes);
+        if (target == null) {
+            target = writeMedia(MediaStore.Files.getContentUri(
+                            MediaStore.VOLUME_EXTERNAL_PRIMARY), name, "application/octet-stream", bytes);
         }
-        return new File(Store.dir(this), name).getAbsolutePath();
+        if (target == null) {
+            target = writeMedia(MediaStore.Downloads.getContentUri(
+                            MediaStore.VOLUME_EXTERNAL_PRIMARY), name, "application/octet-stream", bytes);
+        }
+        if (target != null) {
+            return PUBLIC_ALBUM + "/" + name;
+        }
+        return writePrivate(name, bytes) ? "私有目录（公共相册不让写）" : null;
     }
 
-    private void writePrivate(String name, byte[] bytes) {
+    private Uri writeMedia(Uri collection, String name, String mime, byte[] bytes) {
+        if (Build.VERSION.SDK_INT < 29) {
+            return null;
+        }
+        try {
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+            values.put(MediaStore.MediaColumns.MIME_TYPE, mime);
+            values.put(MediaStore.MediaColumns.RELATIVE_PATH, PUBLIC_ALBUM);
+            values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+            ContentResolver resolver = getContentResolver();
+            Uri target = resolver.insert(collection, values);
+            if (target == null) {
+                return null;
+            }
+            OutputStream out = resolver.openOutputStream(target);
+            if (out == null) {
+                resolver.delete(target, null, null);
+                return null;
+            }
+            try {
+                out.write(bytes);
+            } finally {
+                out.close();
+            }
+            values.clear();
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0);
+            resolver.update(target, values, null, null);
+            return target;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private boolean writePrivate(String name, byte[] bytes) {
         try {
             FileOutputStream fos = new FileOutputStream(new File(Store.dir(this), name));
             try {
@@ -1776,10 +1799,11 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
             } finally {
                 fos.close();
             }
-        } catch (Exception ignored) {
+            return true;
+        } catch (Exception e) {
+            return false;
         }
     }
-
     // ───────────────────────────── video ─────────────────────────────
 
     private void toggleRecording() {

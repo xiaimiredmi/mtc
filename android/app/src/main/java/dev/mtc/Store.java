@@ -169,6 +169,200 @@ public final class Store {
                 cursor.close();
             }
         }
+    }
+    /**
+     * One picture, wherever it happens to live.
+     *
+     * <p>A picture is in the public album (DCIM/MTC, through MediaStore) or in the app's
+     * own folder, and the gallery has to cope with both without asking which. Exactly one
+     * of `file` and `uri` is set.
+     */
+    public static final class Photo {
+        public final String name;
+        public final long size;
+        public final long modified;
+        public final File file;
+        public final Uri uri;
+
+        Photo(String name, long size, long modified, File file, Uri uri) {
+            this.name = name;
+            this.size = size;
+            this.modified = modified;
+            this.file = file;
+            this.uri = uri;
+        }
+
+        public boolean isPublic() {
+            return uri != null;
+        }
+    }
+
+    /** Every `.mtc` the app can see: the public album first, then its own folder. */
+    public static List<Photo> listPhotos(Context context) {
+        List<Photo> out = new ArrayList<Photo>();
+        List<String> seen = new ArrayList<String>();
+        if (Build.VERSION.SDK_INT >= 29) {
+            Cursor cursor = null;
+            try {
+                ContentResolver resolver = context.getContentResolver();
+                cursor = resolver.query(
+                        MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+                        new String[]{
+                                MediaStore.MediaColumns._ID,
+                                MediaStore.MediaColumns.DISPLAY_NAME,
+                                MediaStore.MediaColumns.SIZE,
+                                MediaStore.MediaColumns.DATE_MODIFIED },
+                        MediaStore.MediaColumns.RELATIVE_PATH + " LIKE ?",
+                        new String[]{ "DCIM/MTC%" },
+                        MediaStore.MediaColumns.DATE_MODIFIED + " DESC");
+                while (cursor != null && cursor.moveToNext()) {
+                    String name = cursor.getString(1);
+                    if (name == null || !name.endsWith(".mtc")) {
+                        continue;
+                    }
+                    long id = cursor.getLong(0);
+                    Uri uri = android.content.ContentUris.withAppendedId(
+                            MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), id);
+                    // MediaStore keeps DATE_MODIFIED in seconds.
+                    out.add(new Photo(name, cursor.getLong(2), cursor.getLong(3) * 1000L, null, uri));
+                    seen.add(name);
+                }
+            } catch (Exception ignored) {
+                // A locked-down container has no MediaStore access; the app folder still works.
+            } finally {
+                if (cursor != null) {
+                    cursor.close();
+                }
+            }
+        }
+        File[] files = dir(context).listFiles(new FileFilter() {
+            @Override
+            public boolean accept(File file) {
+                return file.isFile() && file.getName().endsWith(".mtc");
+            }
+        });
+        if (files != null) {
+            for (int i = 0; i < files.length; i++) {
+                File file = files[i];
+                // The public copy is the same picture; showing both would double the grid.
+                if (seen.contains(file.getName())) {
+                    continue;
+                }
+                out.add(new Photo(file.getName(), file.length(), file.lastModified(), file, null));
+            }
+        }
+        Collections.sort(out, new Comparator<Photo>() {
+            @Override
+            public int compare(Photo a, Photo b) {
+                return Long.compare(b.modified, a.modified);
+            }
+        });
+        return out;
+    }
+
+    public static byte[] read(Context context, Photo photo) {
+        if (photo.file != null) {
+            return Mtc.read(photo.file);
+        }
+        try {
+            java.io.InputStream in = context.getContentResolver().openInputStream(photo.uri);
+            if (in == null) {
+                return null;
+            }
+            try {
+                java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+                byte[] buffer = new byte[64 * 1024];
+                int n;
+                while ((n = in.read(buffer)) > 0) {
+                    out.write(buffer, 0, n);
+                }
+                return out.toByteArray();
+            } finally {
+                in.close();
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** A file the rest of the app (and the viewer) can open by path. */
+    public static File materialise(Context context, Photo photo) {
+        if (photo.file != null) {
+            return photo.file;
+        }
+        File cache = new File(context.getCacheDir(), "public");
+        if (!cache.exists()) {
+            cache.mkdirs();
+        }
+        File out = new File(cache, photo.name);
+        if (out.exists() && out.length() == photo.size) {
+            return out;
+        }
+        byte[] bytes = read(context, photo);
+        if (bytes == null) {
+            return null;
+        }
+        try {
+            FileOutputStream fos = new FileOutputStream(out);
+            try {
+                fos.write(bytes);
+            } finally {
+                fos.close();
+            }
+            return out;
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /** Cached thumbnail for a picture, wherever it lives. */
+    public static android.graphics.Bitmap thumbnail(Context context, Photo photo, int side) {
+        File cache = new File(context.getCacheDir(), "thumbs");
+        if (!cache.exists()) {
+            cache.mkdirs();
+        }
+        File thumb = new File(cache, photo.name + "." + side + ".png");
+        if (thumb.exists() && thumb.lastModified() >= photo.modified) {
+            return android.graphics.BitmapFactory.decodeFile(thumb.getAbsolutePath());
+        }
+        byte[] bytes = read(context, photo);
+        if (bytes == null) {
+            return null;
+        }
+        android.graphics.Bitmap bmp = Mtc.thumbnail(bytes, side);
+        if (bmp == null) {
+            return null;
+        }
+        try {
+            FileOutputStream out = new FileOutputStream(thumb);
+            try {
+                bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 90, out);
+            } finally {
+                out.close();
+            }
+        } catch (IOException ignored) {
+        }
+        return bmp;
+    }
+
+    public static boolean deletePhoto(Context context, Photo photo) {
+        boolean ok = false;
+        try {
+            if (photo.uri != null) {
+                ok = context.getContentResolver().delete(photo.uri, null, null) > 0;
+            }
+            if (photo.file != null) {
+                ok = photo.file.delete() || ok;
+            }
+            // The copy on the other side, if the picture was written twice before.
+            File twin = new File(dir(context), photo.name);
+            if (twin.exists() && !twin.equals(photo.file)) {
+                twin.delete();
+                thumbFile(twin).delete();
+            }
+        } catch (Exception ignored) {
+        }
+        return ok;
     }    public static String human(long bytes) {
         if (bytes >= 1024L * 1024L) {
             return String.format(Locale.US, "%.2f MB", bytes / 1048576.0);

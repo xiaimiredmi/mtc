@@ -49,7 +49,7 @@ public class GalleryActivity extends Activity {
     // cached next to the pictures, so this costs a file once and nothing after.
     private final ExecutorService pool = Executors.newFixedThreadPool(1);
     private final Handler ui = new Handler(Looper.getMainLooper());
-    private final List<File> files = new ArrayList<>();
+    private final List<Store.Photo> photos = new ArrayList<>();
     private LruCache<String, Bitmap> cache;
     private GridView grid;
     private TextView stats;
@@ -99,7 +99,12 @@ public class GalleryActivity extends Activity {
             @Override
             public void onItemClick(android.widget.AdapterView<?> parent, View view, int position, long id) {
                 Intent i = new Intent(GalleryActivity.this, ViewerActivity.class);
-                i.putExtra(ViewerActivity.EXTRA_PATH, files.get(position).getAbsolutePath());
+                File local = Store.materialise(GalleryActivity.this, photos.get(position));
+                if (local == null) {
+                    Toast.makeText(GalleryActivity.this, "打不开这张图", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                i.putExtra(ViewerActivity.EXTRA_PATH, local.getAbsolutePath());
                 startActivity(i);
             }
         });
@@ -107,17 +112,17 @@ public class GalleryActivity extends Activity {
             @Override
             public boolean onItemLongClick(android.widget.AdapterView<?> parent, View view,
                                            final int position, long id) {
-                final File file = files.get(position);
+                final Store.Photo photo = photos.get(position);
                 new AlertDialog.Builder(GalleryActivity.this)
-                        .setTitle(file.getName())
-                        .setMessage(Store.human(file.length()) + "，要删除吗？")
+                        .setTitle(photo.name)
+                        .setMessage(Store.human(photo.size) + "，要删除吗？")
                         .setNegativeButton("取消", null)
                         .setPositiveButton("删除", new android.content.DialogInterface.OnClickListener() {
                             @Override
                             public void onClick(android.content.DialogInterface d, int which) {
                                 //noinspection ResultOfMethodCallIgnored
-                                Store.deleteWithThumbnail(file);
-                                cache.remove(file.getAbsolutePath() + "@" + file.lastModified());
+                                Store.deletePhoto(GalleryActivity.this, photo);
+                                cache.evictAll();
                                 reload();
                             }
                         })
@@ -237,13 +242,16 @@ public class GalleryActivity extends Activity {
     }
 
     private void reload() {
-        files.clear();
-        files.addAll(Store.list(this));
+        photos.clear();
+        photos.addAll(Store.listPhotos(this));
         adapter.notifyDataSetChanged();
-        long bytes = Store.totalBytes(files);
+        long bytes = 0;
+        for (int i = 0; i < photos.size(); i++) {
+            bytes += photos.get(i).size;
+        }
         stats.setText(String.format(Locale.US, "%d 张 · %s · %s",
-                files.size(), Store.human(bytes), Store.dir(this).getAbsolutePath()) + Store.publicNote(this));
-        if (files.isEmpty()) {
+                photos.size(), Store.human(bytes), Store.dir(this).getAbsolutePath()) + Store.publicNote(this));
+        if (photos.isEmpty()) {
             Toast.makeText(this, "还没有照片，点下面的“拍照”", Toast.LENGTH_SHORT).show();
         }
     }
@@ -288,12 +296,12 @@ public class GalleryActivity extends Activity {
     private class Adapter extends BaseAdapter {
         @Override
         public int getCount() {
-            return files.size();
+            return photos.size();
         }
 
         @Override
         public Object getItem(int position) {
-            return files.get(position);
+            return photos.get(position);
         }
 
         @Override
@@ -306,8 +314,8 @@ public class GalleryActivity extends Activity {
             ImageView view = reuse instanceof ImageView ? (ImageView) reuse : new ImageView(GalleryActivity.this);
             view.setScaleType(ImageView.ScaleType.CENTER_CROP);
             view.setBackgroundColor(0xFF1E1E22);
-            File file = files.get(position);
-            String key = file.getAbsolutePath() + "@" + file.lastModified();
+            final Store.Photo photo = photos.get(position);
+            String key = photo.name + "@" + photo.modified + "@" + photo.size;
             Bitmap cached = cache.get(key);
             view.setTag(key);
             if (cached != null) {
@@ -320,7 +328,7 @@ public class GalleryActivity extends Activity {
             pool.execute(new Runnable() {
                 @Override
                 public void run() {
-                    final Bitmap bmp = loadThumb(file, side);
+                    final Bitmap bmp = Store.thumbnail(GalleryActivity.this, photo, side);
                     if (bmp == null) {
                         return;
                     }
