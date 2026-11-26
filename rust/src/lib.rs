@@ -18,6 +18,8 @@ pub mod aq;
 pub mod arith;
 pub mod codec;
 pub mod container;
+/// Multi-frame merging: night mode and HDR, the algorithm halves of them.
+pub mod merge;
 pub mod entropy;
 #[cfg(feature = "raster")]
 pub mod imgio;

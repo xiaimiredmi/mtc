@@ -159,6 +159,9 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
     private boolean bursting;
     private int burstCount;
 
+    /** Multi-frame state: the frames of a night or HDR shot as they arrive. */
+    private Multi multi;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -448,7 +451,7 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         lp.setMargins(0, 0, 0, dp(112));
         root.addView(scroll, lp);
 
-        String[] modes = { "专业", "录像", "拍照", "人像", "夜景", "全景" };
+        String[] modes = { "专业", "录像", "拍照", "人像", "夜景", "全景", "HDR" };
         modeButtons = new TextView[modes.length];
         for (int i = 0; i < modes.length; i++) {
             final String name = modes[i];
@@ -1248,7 +1251,251 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         }
     }
 
-    private void loadThumb(String name) {
+
+    /** One multi-frame shot: how many frames, at what exposures, merged which way. */
+    private static final class Multi {
+        final int want;
+        final float[] exposures;
+        final int mode;          // 0 night, 1 hdr
+        final java.util.ArrayList<byte[][]> planes = new java.util.ArrayList<byte[][]>();
+        final java.util.ArrayList<int[]> geometry = new java.util.ArrayList<int[]>();
+        int w;
+        int h;
+
+        Multi(int want, float[] exposures, int mode) {
+            this.want = want;
+            this.exposures = exposures;
+            this.mode = mode;
+        }
+    }
+
+    /**
+     * Take a burst and merge it: the night and HDR modes.
+     *
+     * <p>Runs at 1080p rather than full resolution on purpose. Six frames of 8 MP RGB is
+     * 144 MB before the merge even starts, which is where a phone starts killing apps;
+     * 1080p keeps the whole thing inside a few tens of megabytes, and the point of these
+     * modes is noise and dynamic range, not pixel count.
+     */
+    private void shootMulti(final int count, final float[] exposures, final int mode) {
+        if (device == null || multi != null) {
+            return;
+        }
+        final Size burst = burstSize();
+        if (stills != null) {
+            stills.close();
+            stills = null;
+        }
+        multi = new Multi(count, exposures, mode);
+        multi.w = burst.getWidth();
+        multi.h = burst.getHeight();
+        final ImageReader reader = ImageReader.newInstance(burst.getWidth(), burst.getHeight(),
+                android.graphics.ImageFormat.YUV_420_888, count);
+        final ImageReader[] holder = { reader };
+        reader.setOnImageAvailableListener(new ImageReader.OnImageAvailableListener() {
+            @Override
+            public void onImageAvailable(ImageReader source) {
+                onMultiFrame(source);
+            }
+        }, cameraHandler);
+
+        try {
+            Surface previewSurface = new Surface(preview.getSurfaceTexture());
+            List<Surface> targets = new ArrayList<Surface>();
+            targets.add(previewSurface);
+            targets.add(reader.getSurface());
+            closeSession();
+            device.createCaptureSession(targets, new CameraCaptureSession.StateCallback() {
+                @Override
+                public void onConfigured(CameraCaptureSession configured) {
+                    session = configured;
+                    try {
+                        CaptureRequest.Builder previewBuilder =
+                                baseRequest(CameraDevice.TEMPLATE_PREVIEW, previewSurface);
+                        session.setRepeatingRequest(previewBuilder.build(), null, cameraHandler);
+                        CaptureRequest.Builder still;
+                        for (int i = 0; i < count; i++) {
+                            still = baseRequest(CameraDevice.TEMPLATE_STILL_CAPTURE,
+                                    reader.getSurface());
+                            if (exposures != null && i < exposures.length) {
+                                still.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION,
+                                        Math.round(exposures[i]));
+                            }
+                            session.capture(still.build(), null, cameraHandler);
+                        }
+                        toast(mode == 1 ? "拍 3 帧合成 HDR…" : "拍 " + count + " 帧降噪…");
+                    } catch (Exception e) {
+                        finishMulti();
+                        toast("多帧拍摄失败：" + e.getMessage());
+                    }
+                }
+
+                @Override
+                public void onConfigureFailed(CameraCaptureSession failed) {
+                    finishMulti();
+                    toast("多帧会话配置失败");
+                }
+            }, cameraHandler);
+        } catch (Exception e) {
+            finishMulti();
+            toast("多帧打不开：" + e.getMessage());
+        }
+    }
+
+    /** The size a burst runs at: the still size when that is already small enough. */
+    private Size burstSize() {
+        long cap = 1920L * 1080L;
+        long pixels = (long) stillSize.getWidth() * stillSize.getHeight();
+        if (pixels <= cap) {
+            return stillSize;
+        }
+        double scale = Math.sqrt((double) cap / pixels);
+        int w = Math.max(320, (int) (stillSize.getWidth() * scale) / 2 * 2);
+        int h = Math.max(240, (int) (stillSize.getHeight() * scale) / 2 * 2);
+        return new Size(w, h);
+    }
+
+    private void onMultiFrame(ImageReader reader) {
+        Image image = null;
+        try {
+            image = reader.acquireNextImage();
+            if (image == null || multi == null) {
+                return;
+            }
+            Image.Plane[] planes = image.getPlanes();
+            byte[][] copy = new byte[3][];
+            for (int i = 0; i < 3; i++) {
+                ByteBuffer buffer = planes[i].getBuffer();
+                copy[i] = new byte[buffer.remaining()];
+                buffer.get(copy[i]);
+            }
+            multi.planes.add(copy);
+            multi.geometry.add(new int[]{
+                    planes[0].getRowStride(), planes[1].getRowStride(), planes[1].getPixelStride()});
+            if (multi.planes.size() >= multi.want) {
+                finishMulti();
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (image != null) {
+                image.close();
+            }
+        }
+    }
+
+    /** Merge what arrived, encode it, save it. */
+    private void finishMulti() {
+        final Multi shot = multi;
+        multi = null;
+        if (shot == null) {
+            return;
+        }
+        try {
+            if (session != null) {
+                session.stopRepeating();
+            }
+        } catch (Exception ignored) {
+        }
+        try {
+            final int n = shot.planes.size();
+            if (n == 0) {
+                toast("一帧都没拍到");
+                closeCamera();
+                openCamera();
+                return;
+            }
+            final int w = shot.w;
+            final int h = shot.h;
+            byte[] flat = new byte[n * w * h * 3];
+            for (int i = 0; i < n; i++) {
+                byte[][] planes = shot.planes.get(i);
+                int[] strides = shot.geometry.get(i);
+                yuvToRgb(planes, strides, w, h, flat, i * w * h * 3);
+            }
+            byte[] evs = new byte[n * 4];
+            for (int i = 0; i < n; i++) {
+                float ev = shot.exposures == null || i >= shot.exposures.length ? 0f
+                        : shot.exposures[i];
+                int bits = Float.floatToIntBits(ev);
+                evs[i * 4] = (byte) (bits & 0xFF);
+                evs[i * 4 + 1] = (byte) ((bits >> 8) & 0xFF);
+                evs[i * 4 + 2] = (byte) ((bits >> 16) & 0xFF);
+                evs[i * 4 + 3] = (byte) ((bits >> 24) & 0xFF);
+            }
+            long t0 = System.currentTimeMillis();
+            byte[] merged = Mtc.merge(flat, n, w, h, 3, shot.mode, evs);
+            long ms = System.currentTimeMillis() - t0;
+            if (merged == null) {
+                toast("合成失败");
+                closeCamera();
+                openCamera();
+                return;
+            }
+            byte[] rgba = new byte[w * h * 4];
+            for (int i = 0, o = 0, q = 0; i < w * h; i++, o += 3, q += 4) {
+                rgba[q] = merged[o];
+                rgba[q + 1] = merged[o + 1];
+                rgba[q + 2] = merged[o + 2];
+                rgba[q + 3] = (byte) 255;
+            }
+            byte[] encoded = Mtc.encodeRgba(rgba, w, h, quality);
+            if (encoded == null) {
+                toast("编码失败");
+                return;
+            }
+            final String name = ((shot.mode == 1 ? "HDR_" : "NIGHT_")
+                    + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date())
+                    + ".mtc");
+            savePicture(name, encoded);
+            loadThumb(name);
+            toast((shot.mode == 1 ? "HDR " : "夜景 ") + n + " 帧 → "
+                    + Store.human(encoded.length) + " · 合成 " + ms + " ms");
+        } catch (Exception e) {
+            toast("合成出错：" + e.getMessage());
+        }
+        closeCamera();
+        openCamera();
+    }
+
+    /**
+     * YUV_420_888 to packed RGB, honouring the strides the camera chose.
+     *
+     * <p>Limited range (16-235) versus full range is the difference between a washed out
+     * picture and a correct one, so the same flag the encoder uses decides it here too.
+     */
+    private void yuvToRgb(byte[][] planes, int[] strides, int w, int h, byte[] out, int offset) {
+        int yStride = strides[0];
+        int uStride = strides[1];
+        int uvPixel = strides[2];
+        for (int y = 0; y < h; y++) {
+            int yRow = y * yStride;
+            int uvRow = (y / 2) * uStride;
+            for (int x = 0; x < w; x++) {
+                int yv = planes[0][yRow + x] & 0xFF;
+                int uvAt = uvRow + (x / 2) * uvPixel;
+                int u = (planes[1][uvAt] & 0xFF) - 128;
+                int v = (planes[2][uvAt] & 0xFF) - 128;
+                int r;
+                int g;
+                int b;
+                if (fullRange) {
+                    int c = yv;
+                    r = c + ((359 * v) >> 8);
+                    g = c - ((88 * u + 183 * v) >> 8);
+                    b = c + ((454 * u) >> 8);
+                } else {
+                    int c = Math.max(0, yv - 16) * 255 / 219;
+                    r = c + ((359 * v) >> 8);
+                    g = c - ((88 * u + 183 * v) >> 8);
+                    b = c + ((454 * u) >> 8);
+                }
+                int at = offset + (y * w + x) * 3;
+                out[at] = (byte) Math.max(0, Math.min(255, r));
+                out[at + 1] = (byte) Math.max(0, Math.min(255, g));
+                out[at + 2] = (byte) Math.max(0, Math.min(255, b));
+            }
+        }
+    }    private void loadThumb(String name) {
         try {
             File file = new File(Store.dir(this), name);
             if (!file.exists()) {

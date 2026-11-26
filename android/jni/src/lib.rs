@@ -176,6 +176,61 @@ pub extern "system" fn Java_dev_mtc_Mtc_decodeRgba(
 
 
 /// `info(data) -> String` — a one-line summary for the header, or null.
+/// `merge(frames, count, width, height, channels, mode, exposures) -> byte[] | null`
+///
+/// <p>Night mode and HDR are the same job twice: line the frames up, then combine them.
+/// `mode` is 0 for night (trimmed mean, which is what kills noise) and 1 for HDR
+/// (exposure-weighted average, which is what recovers both ends of the range). The
+/// frames arrive as one flat array of `count` RGB buffers so the call crosses JNI once.
+#[no_mangle]
+pub extern "system" fn Java_dev_mtc_Mtc_merge(
+    mut env: JNIEnv,
+    _class: JClass,
+    frames: JByteArray,
+    count: jint,
+    width: jint,
+    height: jint,
+    channels: jint,
+    mode: jint,
+    exposures: JByteArray,
+) -> jbyteArray {
+    let out = guard(|| {
+        let flat = take_bytes(&mut env, frames).ok()?;
+        let n = count.max(0) as usize;
+        let w = width.max(0) as usize;
+        let h = height.max(0) as usize;
+        let ch = channels;
+        if n == 0 || w == 0 || h == 0 || (ch != 3 && ch != 4) {
+            return None;
+        }
+        let per = w * h * ch as usize;
+        if flat.len() != per * n {
+            return None;
+        }
+        let frames: Vec<Vec<u8>> = (0..n)
+            .map(|i| flat[i * per..(i + 1) * per].to_vec())
+            .collect();
+        let merged = if mode == 1 {
+            let evs = take_bytes(&mut env, exposures).ok()?;
+            let stops: Vec<f32> = if evs.len() == n * 4 {
+                evs.chunks_exact(4)
+                    .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                    .collect()
+            } else {
+                (0..n).map(|i| i as f32 - (n as f32 - 1.0) / 2.0).collect()
+            };
+            mtc::merge::merge_hdr(&frames, &stops, w, h, ch as usize)?
+        } else {
+            mtc::merge::merge_night(&frames, w, h, ch as usize)?
+        };
+        Some(merged)
+    })
+    .flatten();
+    match out {
+        Some(bytes) => give_bytes(&mut env, &bytes),
+        None => std::ptr::null_mut(),
+    }
+}
 #[no_mangle]
 pub extern "system" fn Java_dev_mtc_Mtc_info(
     mut env: JNIEnv,

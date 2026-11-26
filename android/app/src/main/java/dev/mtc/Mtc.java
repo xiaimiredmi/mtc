@@ -46,6 +46,20 @@ public final class Mtc {
     public static native byte[] decodeRgba(byte[] mtc, int maxSide);
 
     public static native String info(byte[] mtc);
+    /**
+     * Combine several frames of the same scene into one.
+     *
+     * <p>Night mode (mode 0) lines the frames up and averages them with the darkest and
+     * brightest sample at each pixel thrown away: noise falls as the square root of the
+     * count, and something that moved does not become a ghost. HDR (mode 1) undoes each
+     * frame's exposure and weights every pixel by how well exposed it was, so the bright
+     * frame supplies the shadows and the dark one the highlights.
+     *
+     * @param frames     `count` RGB buffers, one after another
+     * @param exposures  stops per frame, only used for HDR
+     */
+    public static native byte[] merge(byte[] frames, int count, int width, int height,
+                                      int channels, int mode, byte[] exposures);
 
     public static int width(byte[] decoded) {
         return intAt(decoded, 0);
