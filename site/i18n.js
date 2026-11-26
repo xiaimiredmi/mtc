@@ -1096,16 +1096,24 @@
     }
     document.title = lookup(lang, originalTitle);
     document.documentElement.lang = lang === "zh" ? "zh-CN" : lang;
-    try {
-      localStorage.setItem("mtc.lang", lang);
-    } catch (e) {
-      /* private mode */
+    if (mode === "manual") {
+      try {
+        localStorage.setItem("mtc.lang", lang);
+      } catch (e) {
+        /* private mode */
+      }
     }
     var button = document.getElementById("lang");
     if (button) {
-      button.textContent = SHORT[lang] || lang.toUpperCase();
-      button.setAttribute("aria-label", "Language / " + NAMES[lang]);
-      button.title = NAMES[lang];
+      if (mode === "auto") {
+        button.textContent = "AUTO";
+        button.setAttribute("aria-label", "Language: follows the browser");
+        button.title = NAMES[lang] + " (auto)";
+      } else {
+        button.textContent = SHORT[lang] || lang.toUpperCase();
+        button.setAttribute("aria-label", "Language / " + NAMES[lang]);
+        button.title = NAMES[lang];
+      }
     }
   }
 
@@ -1131,12 +1139,33 @@
     return DICTS.hasOwnProperty(short) ? short : "en";
   }
 
-  var ORDER = ["zh", "en", "ja", "ko", "ru", "es", "fr"];
+  // "auto" is the first step: a manual choice is remembered, and the only way back to
+  // following the browser is to say so explicitly.
+  var ORDER = ["auto", "zh", "en", "ja", "ko", "ru", "es", "fr"];
   var current = initial();
+  var mode = "auto";
+  try {
+    mode = localStorage.getItem("mtc.lang") ? "manual" : "auto";
+  } catch (e) {
+    /* private mode */
+  }
 
   function cycle() {
-    var at = ORDER.indexOf(current);
-    current = ORDER[(at + 1) % ORDER.length];
+    var at = ORDER.indexOf(mode === "auto" ? "auto" : current);
+    var next = ORDER[(at + 1) % ORDER.length];
+    if (next === "auto") {
+      mode = "auto";
+      try {
+        localStorage.removeItem("mtc.lang");
+      } catch (e) {
+        /* private mode */
+      }
+      current = initial();
+      apply(current);
+      return;
+    }
+    mode = "manual";
+    current = next;
     apply(current);
   }
 
