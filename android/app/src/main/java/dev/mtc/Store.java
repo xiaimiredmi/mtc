@@ -1,6 +1,11 @@
 package dev.mtc;
 
+import android.content.ContentResolver;
 import android.content.Context;
+import android.database.Cursor;
+import android.net.Uri;
+import android.os.Build;
+import android.provider.MediaStore;
 import android.os.Environment;
 
 import java.io.File;
@@ -133,7 +138,38 @@ public final class Store {
         mtc.delete();
     }
 
-    public static String human(long bytes) {
+
+    /**
+     * A short note about the copies that live outside the app.
+     *
+     * <p>Pictures are written twice: here for the gallery to browse, and into DCIM/MTC
+     * through MediaStore so other apps and a PC can open them. The album header says how
+     * many of those public copies exist, because "where did my photo go" is a question
+     * the path alone does not answer.
+     */
+    public static String publicNote(Context context) {
+        if (Build.VERSION.SDK_INT < 29) {
+            return "";
+        }
+        Cursor cursor = null;
+        try {
+            ContentResolver resolver = context.getContentResolver();
+            cursor = resolver.query(
+                    MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+                    new String[]{ MediaStore.MediaColumns._ID },
+                    MediaStore.MediaColumns.RELATIVE_PATH + " LIKE ?",
+                    new String[]{ "DCIM/MTC%" },
+                    null);
+            int count = cursor == null ? 0 : cursor.getCount();
+            return count > 0 ? " · 公共 DCIM/MTC " + count + " 张" : "";
+        } catch (Exception e) {
+            return "";
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
+        }
+    }    public static String human(long bytes) {
         if (bytes >= 1024L * 1024L) {
             return String.format(Locale.US, "%.2f MB", bytes / 1048576.0);
         }

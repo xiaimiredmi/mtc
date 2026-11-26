@@ -133,6 +133,9 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
     private int sensorOrientation = 90;
 
     private int flashMode;           // 0 off, 1 auto, 2 on, 3 torch
+    private boolean flashAvailable;
+    /** 0 = use the chosen size, 1..n = halve the still that many times after a failure. */
+    private int stillDegrade;
     private boolean gridOn;
     private boolean levelOn;
     private int timerSeconds;        // 0, 2, 5, 10
@@ -333,10 +336,13 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         flashButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                if (!flashAvailable) {
+                    toast("这台相机没有闪光灯");
+                    return;
+                }
                 flashMode = (flashMode + 1) % 4;
                 persist("flash", flashMode);
                 updateTopLabels();
-                applyRepeating();
                 applyTorch();
             }
         });
@@ -401,7 +407,9 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
     }
 
     private void updateTopLabels() {
-        setCaption(flashButton, "闪光 " + (flashMode == 0 ? "关" : FLASH_LABELS[flashMode]));
+        setCaption(flashButton, flashAvailable
+                ? "闪光 " + (flashMode == 0 ? "关" : FLASH_LABELS[flashMode])
+                : "闪光 无");
         setCaption(gridButton, gridOn ? "网格 开" : "网格 关");
         setCaption(levelButton, levelOn ? "水平 开" : "水平 关");
         setCaption(timerButton, timerSeconds == 0 ? "定时 关" : "定时 " + timerSeconds + "s");
@@ -428,13 +436,17 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
     }
 
     private void buildModeStrip() {
+        HorizontalScrollView scroll = new HorizontalScrollView(this);
+        scroll.setHorizontalScrollBarEnabled(false);
+        scroll.setFillViewport(true);
         LinearLayout strip = new LinearLayout(this);
         strip.setOrientation(LinearLayout.HORIZONTAL);
         strip.setGravity(Gravity.CENTER);
+        scroll.addView(strip);
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(44), Gravity.BOTTOM);
         lp.setMargins(0, 0, 0, dp(112));
-        root.addView(strip, lp);
+        root.addView(scroll, lp);
 
         String[] modes = { "专业", "录像", "拍照", "人像", "夜景", "全景" };
         modeButtons = new TextView[modes.length];
@@ -445,8 +457,8 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
             button.setTextSize(13);
             button.setGravity(Gravity.CENTER);
             modeButtons[i] = button;
-            strip.addView(button, new LinearLayout.LayoutParams(0,
-                    ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+            strip.addView(button, new LinearLayout.LayoutParams(dp(64),
+                    ViewGroup.LayoutParams.MATCH_PARENT));
             button.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
@@ -749,7 +761,16 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
             StreamConfigurationMap map =
                     chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
             stillSize = pickStillSize(map);
+            for (int i = 0; i < stillDegrade; i++) {
+                stillSize = new Size(Math.max(320, stillSize.getWidth() / 2),
+                        Math.max(240, stillSize.getHeight() / 2));
+            }
             previewSize = pickPreviewSize(map, stillSize);
+            Boolean hasFlash = chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+            flashAvailable = hasFlash != null && hasFlash.booleanValue();
+            if (!flashAvailable) {
+                flashMode = 0;
+            }
             Integer sensor = chars.get(CameraCharacteristics.SENSOR_ORIENTATION);
             sensorOrientation = sensor == null ? 90 : sensor.intValue();
 
@@ -957,7 +978,12 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO);
         builder.set(CaptureRequest.CONTROL_AF_MODE,
                 CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
-        builder.set(CaptureRequest.CONTROL_AE_MODE, aeMode());
+        // Flash belongs to the still capture, not to the preview: asking a preview
+        // request for ALWAYS_FLASH is rejected by the camera, the session never
+        // configures, and the viewfinder stays black. That is exactly what happened.
+        boolean still = template == CameraDevice.TEMPLATE_STILL_CAPTURE;
+        builder.set(CaptureRequest.CONTROL_AE_MODE,
+                still && flashAvailable ? aeMode() : CaptureRequest.CONTROL_AE_MODE_ON);
         if (exposureCompensation != 0) {
             builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, exposureCompensation);
         }
@@ -1043,7 +1069,18 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
 
                 @Override
                 public void onConfigureFailed(CameraCaptureSession failed) {
-                    toast("预览配置失败");
+                    // A camera can refuse a session outright - too large a still, or a
+                    // combination a container does not implement. Rather than leave a
+                    // black screen, step the still size down and try again.
+                    if (stillDegrade < 3) {
+                        stillDegrade++;
+                        session = null;
+                        closeCamera();
+                        openCamera();
+                        toast("这台相机吃不消这个尺寸，降到第 " + stillDegrade + " 档重试");
+                    } else {
+                        toast("预览配置失败：相机不接受这个组合");
+                    }
                 }
             }, cameraHandler);
         } catch (CameraAccessException e) {

@@ -242,7 +242,7 @@ public class GalleryActivity extends Activity {
         adapter.notifyDataSetChanged();
         long bytes = Store.totalBytes(files);
         stats.setText(String.format(Locale.US, "%d 张 · %s · %s",
-                files.size(), Store.human(bytes), Store.dir(this).getAbsolutePath()));
+                files.size(), Store.human(bytes), Store.dir(this).getAbsolutePath()) + Store.publicNote(this));
         if (files.isEmpty()) {
             Toast.makeText(this, "还没有照片，点下面的“拍照”", Toast.LENGTH_SHORT).show();
         }
