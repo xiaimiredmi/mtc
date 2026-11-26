@@ -99,11 +99,11 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
     private TextureView preview;
     private FrameLayout root;
     private ViewfinderOverlay overlay;
-    private TextView flashButton;
-    private TextView gridButton;
-    private TextView levelButton;
-    private TextView timerButton;
-    private TextView aspectButton;
+    private LinearLayout flashButton;
+    private LinearLayout gridButton;
+    private LinearLayout levelButton;
+    private LinearLayout timerButton;
+    private LinearLayout aspectButton;
     private LinearLayout zoomBar;
     private TextView[] modeButtons;
     private TextView recordTime;
@@ -137,6 +137,8 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
     private boolean levelOn;
     private int timerSeconds;        // 0, 2, 5, 10
     private int aspectIndex = 1;     // 4:3
+    /** true keeps the whole frame visible (letterboxed); false fills the screen. */
+    private boolean previewFit = true;
     private float requestZoom = 1f;  // digital zoom inside the current camera
     private int exposureCompensation;
 
@@ -176,6 +178,7 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         levelOn = sp.getBoolean("level", false);
         timerSeconds = sp.getInt("timer", 0);
         aspectIndex = sp.getInt("aspect", 1);
+        previewFit = sp.getBoolean("fit", true);
     }
 
     private void persist(String key, int value) {
@@ -199,6 +202,49 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         view.setTextColor(Color.WHITE);
         view.setGravity(Gravity.CENTER);
         return view;
+    }
+
+    /**
+     * A top-bar button: the glyph with its current value underneath.
+     *
+     * <p>The first version was glyphs alone, and nobody could tell what they did. A
+     * two-character caption costs 10 dp and removes the guessing.
+     */
+    private LinearLayout topButton(String glyph, String caption) {
+        LinearLayout holder = new LinearLayout(this);
+        holder.setOrientation(LinearLayout.VERTICAL);
+        holder.setGravity(Gravity.CENTER);
+        TextView symbol = new TextView(this);
+        symbol.setText(glyph);
+        symbol.setTextSize(16);
+        symbol.setTextColor(Color.WHITE);
+        symbol.setGravity(Gravity.CENTER);
+        symbol.setTag("symbol");
+        holder.addView(symbol, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(22)));
+        TextView label = new TextView(this);
+        label.setText(caption);
+        label.setTextSize(9.5f);
+        label.setTextColor(0xFFB9B9C2);
+        label.setGravity(Gravity.CENTER);
+        label.setTag("caption");
+        holder.addView(label, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(13)));
+        return holder;
+    }
+
+    private void setCaption(LinearLayout holder, String caption) {
+        TextView label = (TextView) holder.findViewWithTag("caption");
+        if (label != null) {
+            label.setText(caption);
+        }
+    }
+
+    private void tintSymbol(LinearLayout holder, int color) {
+        TextView symbol = (TextView) holder.findViewWithTag("symbol");
+        if (symbol != null) {
+            symbol.setTextColor(color);
+        }
     }
 
     private void buildUi() {
@@ -278,12 +324,12 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        top.setPadding(dp(8), dp(8), dp(8), dp(8));
+        top.setPadding(dp(6), dp(6), dp(6), dp(6));
         root.addView(top, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(56), Gravity.TOP));
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(58), Gravity.TOP));
 
-        flashButton = icon("⚡");
-        top.addView(flashButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        flashButton = topButton("⚡", "闪光 关");
+        top.addView(flashButton, new LinearLayout.LayoutParams(dp(62), dp(48)));
         flashButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -295,8 +341,8 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
             }
         });
 
-        gridButton = icon("#");
-        top.addView(gridButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        gridButton = topButton("#", "网格 关");
+        top.addView(gridButton, new LinearLayout.LayoutParams(dp(52), dp(48)));
         gridButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -307,8 +353,8 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
             }
         });
 
-        levelButton = icon("⌁");
-        top.addView(levelButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        levelButton = topButton("⌁", "水平 关");
+        top.addView(levelButton, new LinearLayout.LayoutParams(dp(52), dp(48)));
         levelButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -319,8 +365,8 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
             }
         });
 
-        timerButton = icon("⏱");
-        top.addView(timerButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        timerButton = topButton("⏱", "定时 关");
+        top.addView(timerButton, new LinearLayout.LayoutParams(dp(52), dp(48)));
         timerButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -331,8 +377,8 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
             }
         });
 
-        aspectButton = icon("▭");
-        top.addView(aspectButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        aspectButton = topButton("▭", "4:3");
+        top.addView(aspectButton, new LinearLayout.LayoutParams(dp(52), dp(48)));
         aspectButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -344,7 +390,7 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
             }
         });
 
-        TextView more = icon("⋯");
+        LinearLayout more = topButton("⋯", "设置");
         top.addView(more, new LinearLayout.LayoutParams(0, dp(48), 1f));
         more.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -355,16 +401,17 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
     }
 
     private void updateTopLabels() {
-        flashButton.setTextColor(flashMode == 0 ? 0xFF9A9AA2 : 0xFFFFD166);
-        gridButton.setTextColor(gridOn ? 0xFFFFD166 : 0xFF9A9AA2);
-        levelButton.setTextColor(levelOn ? 0xFFFFD166 : 0xFF9A9AA2);
-        timerButton.setText(timerSeconds == 0 ? "⏱" : "⏱" + timerSeconds);
-        timerButton.setTextColor(timerSeconds == 0 ? 0xFF9A9AA2 : 0xFFFFD166);
-        aspectButton.setText(ASPECT_LABELS[aspectIndex]);
-        aspectButton.setTextSize(11);
-        aspectButton.setTextColor(aspectIndex == 3 ? 0xFF9A9AA2 : 0xFFFFD166);
+        setCaption(flashButton, "闪光 " + (flashMode == 0 ? "关" : FLASH_LABELS[flashMode]));
+        setCaption(gridButton, gridOn ? "网格 开" : "网格 关");
+        setCaption(levelButton, levelOn ? "水平 开" : "水平 关");
+        setCaption(timerButton, timerSeconds == 0 ? "定时 关" : "定时 " + timerSeconds + "s");
+        setCaption(aspectButton, ASPECT_LABELS[aspectIndex]);
+        tintSymbol(flashButton, flashMode == 0 ? 0xFFB9B9C2 : 0xFFFFD166);
+        tintSymbol(gridButton, gridOn ? 0xFFFFD166 : 0xFFB9B9C2);
+        tintSymbol(levelButton, levelOn ? 0xFFFFD166 : 0xFFB9B9C2);
+        tintSymbol(timerButton, timerSeconds == 0 ? 0xFFB9B9C2 : 0xFFFFD166);
+        tintSymbol(aspectButton, aspectIndex == 3 ? 0xFFB9B9C2 : 0xFFFFD166);
     }
-
     /** The zoom bar: one entry per physical camera the device reports. */
     private void buildZoomBar() {
         HorizontalScrollView scroll = new HorizontalScrollView(this);
@@ -451,7 +498,8 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         thumb.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                finish();
+                startActivity(new android.content.Intent(CameraActivity.this,
+                        GalleryActivity.class));
             }
         });
 
@@ -890,7 +938,9 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         boolean swapped = (deg % 180) != 0;
         float bw = swapped ? previewSize.getHeight() : previewSize.getWidth();
         float bh = swapped ? previewSize.getWidth() : previewSize.getHeight();
-        float scale = Math.max(vw / bw, vh / bh);
+        // Fit keeps the whole frame on screen and letterboxes the rest; fill crops
+        // instead. Neither stretches: the scale is one number for both axes either way.
+        float scale = previewFit ? Math.min(vw / bw, vh / bh) : Math.max(vw / bw, vh / bh);
         android.graphics.Matrix matrix = new android.graphics.Matrix();
         matrix.postRotate(deg);
         matrix.postScale(scale, scale);
@@ -1446,6 +1496,7 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         final TextView qualityRow = row(sheet);
         final TextView rotation = row(sheet);
         final TextView range = row(sheet);
+        final TextView fitRow = row(sheet);
         final TextView diagnostics = new TextView(this);
         diagnostics.setTextSize(11.5f);
         diagnostics.setTextColor(0xFF666670);
@@ -1461,6 +1512,7 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
                         ? "方向：自动（传感器 " + sensorOrientation + "°）"
                         : "方向：固定 " + rotationOverride + "°");
                 range.setText(fullRange ? "色彩范围：全 (0-255)" : "色彩范围：有限 (16-235)");
+                fitRow.setText(previewFit ? "取景：完整（不裁切）" : "取景：填满屏幕（会裁切边缘）");
                 diagnostics.setText(String.format(Locale.US,
                         "拍照 %d×%d · 预览 %d×%d · 传感器 %d° 转 %d°\n闪光 %s · 画幅 %s · 定时 %d s\n照片 → %s，视频 → %s",
                         stillSize.getWidth(), stillSize.getHeight(),
@@ -1527,6 +1579,16 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
                 fullRange = !fullRange;
                 persist("fullRange", fullRange);
                 refresh.run();
+            }
+        });
+
+        fitRow.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                previewFit = !previewFit;
+                persist("fit", previewFit);
+                refresh.run();
+                configureTransform();
             }
         });
 

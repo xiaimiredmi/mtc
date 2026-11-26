@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="dev.mtc"
-    android:versionCode="1"
-    android:versionName="0.1">
+    android:versionCode="7"
+    android:versionName="1.7.0">
 
     <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
 
@@ -19,10 +19,13 @@
         android:hardwareAccelerated="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
-        <!-- The gallery is the launcher; the camera is one tap away. -->
+        <!-- Opening the app goes straight to the camera. The album is one tap away,
+             behind the thumbnail in the corner: a camera that opens into a list of last
+             week's pictures is a gallery with a camera bolted on. -->
         <activity
-            android:name=".GalleryActivity"
+            android:name=".CameraActivity"
             android:exported="true"
+            android:screenOrientation="portrait"
             android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -31,9 +34,8 @@
         </activity>
 
         <activity
-            android:name=".CameraActivity"
+            android:name=".GalleryActivity"
             android:exported="false"
-            android:screenOrientation="portrait"
             android:configChanges="orientation|screenSize|keyboardHidden" />
 
         <activity

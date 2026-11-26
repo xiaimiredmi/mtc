@@ -16,7 +16,7 @@ $ErrorActionPreference = 'Stop'
 $Bin = (Resolve-Path $Bin).Path
 $viewer = Join-Path $Bin 'mtview.exe'
 $iconFile = Join-Path $PSScriptRoot 'mtc.ico'
-$icon = if (Test-Path $iconFile) { $iconFile } else { "$viewer,0" }
+$icon = if (Test-Path $iconFile) { "$iconFile,0" } else { "$viewer,0" }
 $friendly = 'MTC ' + [char]0x56FE + [char]0x7247
 
 function Set-Default($path, $value) {
@@ -75,6 +75,17 @@ public static extern System.IntPtr SendMessageTimeout(System.IntPtr hWnd, uint M
 $result = [UIntPtr]::Zero
 [void][Win32.Env]::SendMessageTimeout([IntPtr]0xffff, 0x1A, [UIntPtr]::Zero, 'Environment', 2, 3000, [ref]$result)
 
+# Explorer caches file-type icons hard. Tell it the associations changed and rebuild the
+# cache, or a freshly registered icon still shows as a blank page until the next logon.
+if (-not ('Win32.Shell' -as [type])) {
+    Add-Type -Namespace Win32 -Name Shell -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("shell32.dll")]
+public static extern void SHChangeNotify(int eventId, uint flags, System.IntPtr item1, System.IntPtr item2);
+'@
+}
+[Win32.Shell]::SHChangeNotify(0x08000000, 0x0000, [IntPtr]::Zero, [IntPtr]::Zero)
+$ie4uinit = Join-Path $env:SystemRoot 'System32\ie4uinit.exe'
+if (Test-Path $ie4uinit) { Start-Process -FilePath $ie4uinit -ArgumentList '-show' -WindowStyle Hidden }
 Write-Host "registered: .mtc opens with $viewer"
 Write-Host "icon:       $icon"
 Write-Host "PATH:       $Bin (first)"
