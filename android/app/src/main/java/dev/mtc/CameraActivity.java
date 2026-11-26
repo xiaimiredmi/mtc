@@ -11,6 +11,7 @@ import android.content.pm.PackageManager;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
 import android.graphics.drawable.GradientDrawable;
 import android.hardware.camera2.CameraAccessException;
@@ -19,6 +20,9 @@ import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
+import android.hardware.camera2.CaptureResult;
+import android.hardware.camera2.TotalCaptureResult;
+import android.hardware.camera2.params.Face;
 import android.hardware.camera2.params.MeteringRectangle;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.Image;
@@ -90,7 +94,8 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
 
     private static final String SP = "camera";
     private static final String PUBLIC_ALBUM = "DCIM/MTC";
-    private static final String PUBLIC_VIDEO = "Movies/MTC";
+    /** Videos land in the same album as the pictures: one place to look. */
+    private static final String PUBLIC_VIDEO = PUBLIC_ALBUM;
 
     private HandlerThread worker;
     private Handler cameraHandler;
@@ -108,6 +113,9 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
     private Surface previewSurface;
     private volatile int framesSeen;
     private boolean safeMode;
+    /** null when the camera has no face detection; the mode to request otherwise. */
+    private Integer faceMode;
+    private boolean faceBoxes = true;
     private TextView diagnostics;
     private FrameLayout root;
     private ViewfinderOverlay overlay;
@@ -196,6 +204,7 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         levelOn = sp.getBoolean("level", false);
         timerSeconds = sp.getInt("timer", 0);
         aspectIndex = sp.getInt("aspect", 1);
+        faceBoxes = sp.getBoolean("faces", true);
         previewFit = sp.getBoolean("fit", true);
     }
 
@@ -820,6 +829,22 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
             if (!flashAvailable) {
                 flashMode = 0;
             }
+            int[] faceModes = chars.get(CameraCharacteristics.STATISTICS_INFO_AVAILABLE_FACE_DETECT_MODES);
+            faceMode = null;
+            if (faceModes != null) {
+                for (int i = 0; i < faceModes.length; i++) {
+                    if (faceModes[i] == CaptureRequest.STATISTICS_FACE_DETECT_MODE_FULL) {
+                        faceMode = CaptureRequest.STATISTICS_FACE_DETECT_MODE_FULL;
+                    }
+                }
+                if (faceMode == null) {
+                    for (int i = 0; i < faceModes.length; i++) {
+                        if (faceModes[i] == CaptureRequest.STATISTICS_FACE_DETECT_MODE_SIMPLE) {
+                            faceMode = CaptureRequest.STATISTICS_FACE_DETECT_MODE_SIMPLE;
+                        }
+                    }
+                }
+            }
             Integer sensor = chars.get(CameraCharacteristics.SENSOR_ORIENTATION);
             sensorOrientation = sensor == null ? 90 : sensor.intValue();
 
@@ -1039,6 +1064,9 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         if (exposureCompensation != 0) {
             builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, exposureCompensation);
         }
+        if (faceMode != null && faceBoxes) {
+            builder.set(CaptureRequest.STATISTICS_FACE_DETECT_MODE, faceMode.intValue());
+        }
         if (focusAreas != null) {
             builder.set(CaptureRequest.CONTROL_AF_REGIONS, focusAreas);
             builder.set(CaptureRequest.CONTROL_AE_REGIONS, meteringAreas);
@@ -1107,7 +1135,7 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
                 public void onConfigured(CameraCaptureSession configured) {
                     session = configured;
                     try {
-                        session.setRepeatingRequest(request, null, cameraHandler);
+                        session.setRepeatingRequest(request, faceCallback, cameraHandler);
                         framesSeen = 0;
                         startWatchdog();
                         preview.post(new Runnable() {
@@ -1198,6 +1226,94 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
                 stillSize.getWidth(), stillSize.getHeight(),
                 sensorOrientation, stillRotation(),
                 safeMode ? "开" : "关"));
+    }
+    /**
+     * Turns the camera's own face detections into boxes on screen.
+     *
+     * <p>Camera2 reports faces as rectangles in sensor coordinates, which is a different
+     * space in a different orientation from the view - so they are normalised, turned by
+     * the same angle the preview is turned by, mirrored for the front camera, and then
+     * placed inside the letterboxed rectangle the picture actually occupies. Anything
+     * simpler puts the box next to the face, which is worse than no box.
+     */
+    private final CameraCaptureSession.CaptureCallback faceCallback =
+            new CameraCaptureSession.CaptureCallback() {
+                @Override
+                public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request,
+                                               TotalCaptureResult result) {
+                    if (overlay == null) {
+                        return;
+                    }
+                    Face[] faces = result.get(CaptureResult.STATISTICS_FACES);
+                    final java.util.ArrayList<RectF> boxes = new java.util.ArrayList<RectF>();
+                    if (faces != null && activeArray != null && activeArray.width() > 0) {
+                        for (int i = 0; i < faces.length; i++) {
+                            Rect bounds = faces[i].getBounds();
+                            if (bounds != null) {
+                                boxes.add(mapFace(bounds));
+                            }
+                        }
+                    }
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            overlay.setFaces(boxes);
+                        }
+                    });
+                }
+            };
+
+    /** A face rectangle in sensor space, mapped into view space. */
+    private RectF mapFace(Rect bounds) {
+        float sx = (bounds.left - activeArray.left) / (float) activeArray.width();
+        float sy = (bounds.top - activeArray.top) / (float) activeArray.height();
+        float sw = bounds.width() / (float) activeArray.width();
+        float sh = bounds.height() / (float) activeArray.height();
+        int deg = safeMode ? 0 : stillRotation();
+        float u;
+        float v;
+        float w;
+        float h;
+        switch (deg) {
+            case 90:
+                u = 1 - sy - sh;
+                v = sx;
+                w = sh;
+                h = sw;
+                break;
+            case 180:
+                u = 1 - sx - sw;
+                v = 1 - sy - sh;
+                w = sw;
+                h = sh;
+                break;
+            case 270:
+                u = sy;
+                v = 1 - sx - sw;
+                w = sh;
+                h = sw;
+                break;
+            default:
+                u = sx;
+                v = sy;
+                w = sw;
+                h = sh;
+                break;
+        }
+        if (front) {
+            u = 1 - u - w;
+        }
+        float vw = Math.max(1, preview.getWidth());
+        float vh = Math.max(1, preview.getHeight());
+        boolean swapped = (deg % 180) != 0;
+        float bw = swapped ? previewSize.getHeight() : previewSize.getWidth();
+        float bh = swapped ? previewSize.getWidth() : previewSize.getHeight();
+        float scale = previewFit ? Math.min(vw / bw, vh / bh) : Math.max(vw / bw, vh / bh);
+        float dw = bw * scale;
+        float dh = bh * scale;
+        float left = (vw - dw) / 2f;
+        float top = (vh - dh) / 2f;
+        return new RectF(left + u * dw, top + v * dh, left + (u + w) * dw, top + (v + h) * dh);
     }    private void closeCamera() {
         closeSession();
         if (device != null) {
@@ -1888,6 +2004,7 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         final TextView rotation = row(sheet);
         final TextView range = row(sheet);
         final TextView fitRow = row(sheet);
+        final TextView faceRow = row(sheet);
         final TextView diagnostics = new TextView(this);
         diagnostics.setTextSize(11.5f);
         diagnostics.setTextColor(0xFF666670);
@@ -1904,6 +2021,9 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
                         : "方向：固定 " + rotationOverride + "°");
                 range.setText(fullRange ? "色彩范围：全 (0-255)" : "色彩范围：有限 (16-235)");
                 fitRow.setText(previewFit ? "取景：完整（不裁切）" : "取景：填满屏幕（会裁切边缘）");
+                faceRow.setText(faceMode == null
+                        ? "人脸框：这台相机不支持"
+                        : (faceBoxes ? "人脸框：开" : "人脸框：关"));
                 diagnostics.setText(String.format(Locale.US,
                         "拍照 %d×%d · 预览 %d×%d · 传感器 %d° 转 %d°\n闪光 %s · 画幅 %s · 定时 %d s\n照片 → %s，视频 → %s",
                         stillSize.getWidth(), stillSize.getHeight(),
@@ -1970,6 +2090,20 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
                 fullRange = !fullRange;
                 persist("fullRange", fullRange);
                 refresh.run();
+            }
+        });
+
+        faceRow.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (faceMode == null) {
+                    toast("这台相机不做人脸检测");
+                    return;
+                }
+                faceBoxes = !faceBoxes;
+                persist("faces", faceBoxes);
+                refresh.run();
+                applyRepeating();
             }
         });
 

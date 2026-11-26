@@ -46,6 +46,8 @@ public class ViewfinderOverlay extends View implements SensorEventListener {
     private final Sensor gravity;
 
     private Listener listener;
+    /** Faces as boxes already in view coordinates, so this class stays dumb. */
+    private final java.util.ArrayList<RectF> faces = new java.util.ArrayList<RectF>();
 
     public ViewfinderOverlay(Context context) {
         super(context);
@@ -85,6 +87,15 @@ public class ViewfinderOverlay extends View implements SensorEventListener {
 
     public void hideExposure() {
         showEv = false;
+        invalidate();
+    }
+
+    /** Draw these boxes as face frames. */
+    public void setFaces(java.util.ArrayList<RectF> boxes) {
+        faces.clear();
+        if (boxes != null) {
+            faces.addAll(boxes);
+        }
         invalidate();
     }
 
@@ -163,6 +174,16 @@ public class ViewfinderOverlay extends View implements SensorEventListener {
             line.setStrokeWidth(dp(1f));
             canvas.drawLine(cx - half * 0.35f, cy, cx + half * 0.35f, cy, line);
         }
+
+        for (int i = 0; i < faces.size(); i++) {
+            RectF face = faces.get(i);
+            if (face.width() < dp(8)) {
+                continue;
+            }
+            box.setColor(0xCC5ED6EC);
+            canvas.drawRoundRect(face, dp(10), dp(10), box);
+        }
+        box.setColor(0xCCFFD166);
 
         if (focusX >= 0) {
             float size = dp(72);
