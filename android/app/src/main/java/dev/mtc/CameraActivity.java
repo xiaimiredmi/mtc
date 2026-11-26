@@ -97,6 +97,18 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
     private final Handler ui = new Handler(Looper.getMainLooper());
 
     private TextureView preview;
+    /**
+     * The one Surface that wraps the preview texture.
+     *
+     * <p>Creating a fresh Surface per request (which an earlier version did on every zoom,
+     * focus tap and flash change) leaves the producer with Surfaces it never released, and
+     * the symptom is a black viewfinder - the consumer stops getting buffers even though
+     * the session still reports itself as configured.
+     */
+    private Surface previewSurface;
+    private volatile int framesSeen;
+    private boolean safeMode;
+    private TextView diagnostics;
     private FrameLayout root;
     private ViewfinderOverlay overlay;
     private LinearLayout flashButton;
@@ -263,6 +275,13 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         preview.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
             @Override
             public void onSurfaceTextureAvailable(SurfaceTexture s, int w, int h) {
+                try {
+                    if (previewSurface != null) {
+                        previewSurface.release();
+                    }
+                    previewSurface = new Surface(s);
+                } catch (Exception ignored) {
+                }
                 openCamera();
             }
 
@@ -273,11 +292,16 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
 
             @Override
             public boolean onSurfaceTextureDestroyed(SurfaceTexture s) {
+                if (previewSurface != null) {
+                    previewSurface.release();
+                    previewSurface = null;
+                }
                 return true;
             }
 
             @Override
             public void onSurfaceTextureUpdated(SurfaceTexture s) {
+                framesSeen++;
             }
         });
 
@@ -405,6 +429,18 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
             @Override
             public void onClick(View v) {
                 showSettings();
+            }
+        });
+        // Long press for the numbers: the one thing that makes "it is black" debuggable.
+        more.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override
+            public boolean onLongClick(View v) {
+                if (diagnostics != null && diagnostics.getVisibility() == View.VISIBLE) {
+                    diagnostics.setVisibility(View.GONE);
+                } else {
+                    showDiagnostics();
+                }
+                return true;
             }
         });
     }
@@ -614,7 +650,10 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         try {
             CaptureRequest.Builder trigger =
                     device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
-            trigger.addTarget(new Surface(preview.getSurfaceTexture()));
+            if (previewSurface == null) {
+                return;
+            }
+            trigger.addTarget(previewSurface);
             trigger.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START);
             trigger.set(CaptureRequest.CONTROL_AF_REGIONS, focusAreas);
             trigger.set(CaptureRequest.CONTROL_AE_REGIONS, meteringAreas);
@@ -764,11 +803,18 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
             StreamConfigurationMap map =
                     chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
             stillSize = pickStillSize(map);
+            if (safeMode) {
+                // The smallest thing a camera is guaranteed to support.
+                stillSize = new Size(640, 480);
+            }
             for (int i = 0; i < stillDegrade; i++) {
                 stillSize = new Size(Math.max(320, stillSize.getWidth() / 2),
                         Math.max(240, stillSize.getHeight() / 2));
             }
             previewSize = pickPreviewSize(map, stillSize);
+            if (safeMode) {
+                previewSize = new Size(640, 480);
+            }
             Boolean hasFlash = chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
             flashAvailable = hasFlash != null && hasFlash.booleanValue();
             if (!flashAvailable) {
@@ -957,6 +1003,9 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
             return;
         }
         int deg = stillRotation();
+        if (safeMode) {
+            deg = 0;
+        }
         float vw = preview.getWidth();
         float vh = preview.getHeight();
         boolean swapped = (deg % 180) != 0;
@@ -1026,12 +1075,12 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
     }
 
     private void applyRepeating() {
-        if (session == null || device == null || preview.getSurfaceTexture() == null) {
+        if (session == null || device == null || previewSurface == null) {
             return;
         }
         try {
-            CaptureRequest.Builder builder = baseRequest(CameraDevice.TEMPLATE_PREVIEW,
-                    new Surface(preview.getSurfaceTexture()));
+            CaptureRequest.Builder builder =
+                    baseRequest(CameraDevice.TEMPLATE_PREVIEW, previewSurface);
             session.setRepeatingRequest(builder.build(), null, cameraHandler);
         } catch (Exception ignored) {
         }
@@ -1049,7 +1098,7 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
 
             List<Surface> targets = new ArrayList<Surface>();
             targets.add(surface);
-            if (!videoMode) {
+            if (!videoMode && !safeMode && stills != null) {
                 targets.add(stills.getSurface());
             }
             final CaptureRequest request = builder.build();
@@ -1059,6 +1108,8 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
                     session = configured;
                     try {
                         session.setRepeatingRequest(request, null, cameraHandler);
+                        framesSeen = 0;
+                        startWatchdog();
                         preview.post(new Runnable() {
                             @Override
                             public void run() {
@@ -1091,7 +1142,63 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         }
     }
 
-    private void closeCamera() {
+
+    /**
+     * If no frame has been drawn a moment after the session configured, something is
+     * wrong in a way the session callback cannot see, so say so and try the safest
+     * configuration there is.
+     *
+     * <p>"Black screen" is the hardest bug report to act on - the session reports success,
+     * no exception is thrown, and the picture simply never arrives. A frame counter is the
+     * only honest signal, and it turns the report into either a working preview or a line
+     * of text with the numbers in it.
+     */
+    private void startWatchdog() {
+        ui.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (framesSeen > 0 || device == null) {
+                    return;
+                }
+                if (!safeMode) {
+                    safeMode = true;
+                    toast("取景没有画面，切到安全模式重试");
+                    closeCamera();
+                    openCamera();
+                } else {
+                    showDiagnostics();
+                    toast("安全模式也没有画面，屏幕上那一行是原因");
+                }
+            }
+        }, 2500);
+    }
+
+    /** A line of numbers over the viewfinder, for when a picture is not arriving. */
+    private void showDiagnostics() {
+        if (diagnostics == null) {
+            diagnostics = new TextView(this);
+            diagnostics.setTextSize(10.5f);
+            diagnostics.setTextColor(0xFFFFD166);
+            diagnostics.setBackgroundColor(0xCC000000);
+            diagnostics.setPadding(dp(8), dp(4), dp(8), dp(4));
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.BOTTOM);
+            lp.setMargins(0, 0, 0, dp(160));
+            root.addView(diagnostics, lp);
+        }
+        diagnostics.setVisibility(View.VISIBLE);
+        diagnostics.setText(String.format(Locale.US,
+                "设备 %s · 会话 %s · 面 %s · 帧 %d · 预览 %dx%d · 拍照 %dx%d · 传感器 %d° → %d° · 安全 %s",
+                device != null ? "有" : "无",
+                session != null ? "有" : "无",
+                previewSurface != null ? "有" : "无",
+                framesSeen,
+                previewSize.getWidth(), previewSize.getHeight(),
+                stillSize.getWidth(), stillSize.getHeight(),
+                sensorOrientation, stillRotation(),
+                safeMode ? "开" : "关"));
+    }    private void closeCamera() {
         closeSession();
         if (device != null) {
             device.close();
@@ -1300,9 +1407,9 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         }, cameraHandler);
 
         try {
-            Surface previewSurface = new Surface(preview.getSurfaceTexture());
+            final Surface recordPreview = previewSurface;
             List<Surface> targets = new ArrayList<Surface>();
-            targets.add(previewSurface);
+            targets.add(recordPreview);
             targets.add(reader.getSurface());
             closeSession();
             device.createCaptureSession(targets, new CameraCaptureSession.StateCallback() {
@@ -1311,7 +1418,7 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
                     session = configured;
                     try {
                         CaptureRequest.Builder previewBuilder =
-                                baseRequest(CameraDevice.TEMPLATE_PREVIEW, previewSurface);
+                                baseRequest(CameraDevice.TEMPLATE_PREVIEW, recordPreview);
                         session.setRepeatingRequest(previewBuilder.build(), null, cameraHandler);
                         CaptureRequest.Builder still;
                         for (int i = 0; i < count; i++) {
@@ -1598,9 +1705,9 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
             recorder = rec;
             recorderSurface = rec.getSurface();
 
-            final Surface previewSurface = new Surface(preview.getSurfaceTexture());
+            final Surface recordPreview = previewSurface;
             List<Surface> targets = new ArrayList<Surface>();
-            targets.add(previewSurface);
+            targets.add(recordPreview);
             targets.add(recorderSurface);
             closeSession();
             device.createCaptureSession(targets, new CameraCaptureSession.StateCallback() {
@@ -1609,7 +1716,7 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
                     session = configured;
                     try {
                         CaptureRequest.Builder builder =
-                                baseRequest(CameraDevice.TEMPLATE_RECORD, previewSurface);
+                                baseRequest(CameraDevice.TEMPLATE_RECORD, recordPreview);
                         builder.addTarget(recorderSurface);
                         session.setRepeatingRequest(builder.build(), null, cameraHandler);
                         recorder.start();
