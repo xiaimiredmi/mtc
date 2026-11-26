@@ -18,16 +18,18 @@
   var FALLBACK = "en";
 
   var EN = {
-    "MTC · 自己写的图片编解码器": "MTC · an image codec written from scratch",
+    "，": ",",
+    "MTC · 更高效的图片编解码器": "MTC · a more efficient image codec",
+    "Rust · 同画质更小 · 无第三方编解码库": "Rust · smaller at the same quality · no third-party codec",
+    "靠的是": "thanks to ",
+    "更高效的": "a more efficient ",
+    "编解码器": "codec",
     "试一下": "Try it",
     "原理": "How it works",
     "数据": "Numbers",
     "安卓": "Android",
     "下载": "Download",
-    "Rust · 自研格式 · 无第三方编解码库": "Rust · own format · no third-party codec",
     "把照片压小": "Smaller photos,",
-    "用的还是": "with a codec",
-    "编解码器": "",
     "8×8 DCT、零区量化、上下文算术编码、无损与精确 alpha。": "8×8 DCT, dead-zone quantisation, context arithmetic coding, lossless and exact alpha.",
     "这个页面里的每一个字节都是你的浏览器现场算出来的":
       "Every byte on this page is computed by your browser, right now",
@@ -135,7 +137,6 @@
     "反馈 / 建议：": "Feedback: ",
     "页面上的编码器是 WebAssembly，和命令行走同一份代码。":
       "The encoder on this page is WebAssembly, running the same code as the command line.",
-    "自己写的": " of my own",
     "——同一份 Rust 代码， 编译成 WebAssembly，拖一张图进来就能看到。":
       " - the same Rust code, compiled to WebAssembly. Drop an image in and watch.",
     "页面上的编码器是 WebAssembly（容器 v2），和命令行走同一份 Rust 代码。":
@@ -174,17 +175,18 @@
   };
 
   var JA = {
-    "MTC · 自己写的图片编解码器": "MTC · 一から書いた画像コーデック",
+    "，": "、",
+    "MTC · 更高效的图片编解码器": "MTC · より効率のよい画像コーデック",
+    "Rust · 同画质更小 · 无第三方编解码库": "Rust · 同じ画質でより小さく · 外部コーデックなし",
+    "靠的是": "理由は",
+    "更高效的": "より効率のよい",
+    "编解码器": "コーデック",
     "试一下": "試す",
     "原理": "仕組み",
     "数据": "数値",
     "安卓": "Android",
     "下载": "ダウンロード",
-    "Rust · 自研格式 · 无第三方编解码库": "Rust · 独自フォーマット · 外部コーデックなし",
     "把照片压小": "写真を小さく、",
-    "用的还是": "使うのは",
-    "自己写的": "自作の",
-    "编解码器": "コーデック",
     "8×8 DCT、零区量化、上下文算术编码、无损与精确 alpha。": "8×8 DCT、デッドゾーン量子化、文脈算術符号化、ロスレスと正確なアルファ。",
     "这个页面里的每一个字节都是你的浏览器现场算出来的":
       "このページのバイトはすべて、いまあなたのブラウザが計算したものです",
@@ -336,17 +338,18 @@
   };
 
   var KO = {
-    "MTC · 自己写的图片编解码器": "MTC · 직접 만든 이미지 코덱",
+    "，": ",",
+    "MTC · 更高效的图片编解码器": "MTC · 더 효율적인 이미지 코덱",
+    "Rust · 同画质更小 · 无第三方编解码库": "Rust · 같은 화질에 더 작게 · 외부 코덱 없음",
+    "靠的是": "비결은 ",
+    "更高效的": "더 효율적인 ",
+    "编解码器": "코덱",
     "试一下": "써 보기",
     "原理": "원리",
     "数据": "수치",
     "安卓": "안드로이드",
     "下载": "다운로드",
-    "Rust · 自研格式 · 无第三方编解码库": "Rust · 자체 포맷 · 외부 코덱 없음",
     "把照片压小": "사진을 더 작게,",
-    "用的还是": "사용한 것은",
-    "自己写的": "직접 만든",
-    "编解码器": "코덱",
     "8×8 DCT、零区量化、上下文算术编码、无损与精确 alpha。": "8×8 DCT, 데드존 양자화, 문맥 산술 부호화, 무손실과 정확한 알파.",
     "这个页面里的每一个字节都是你的浏览器现场算出来的":
       "이 페이지의 모든 바이트는 지금 당신의 브라우저가 계산한 것입니다",
@@ -498,17 +501,18 @@
   };
 
   var RU = {
-    "MTC · 自己写的图片编解码器": "MTC · кодек изображений, написанный с нуля",
+    "，": ",",
+    "MTC · 更高效的图片编解码器": "MTC · более эффективный кодек изображений",
+    "Rust · 同画质更小 · 无第三方编解码库": "Rust · меньше при том же качестве · без сторонних кодеков",
+    "靠的是": "благодаря ",
+    "更高效的": "более эффективному ",
+    "编解码器": "кодеку",
     "试一下": "Попробовать",
     "原理": "Как работает",
     "数据": "Цифры",
     "安卓": "Android",
     "下载": "Скачать",
-    "Rust · 自研格式 · 无第三方编解码库": "Rust · собственный формат · без сторонних кодеков",
     "把照片压小": "Фотографии меньше,",
-    "用的还是": "и всё это на",
-    "自己写的": " собственном",
-    "编解码器": " кодеке",
     "8×8 DCT、零区量化、上下文算术编码、无损与精确 alpha。": "ДКП 8×8, квантование с мёртвой зоной, контекстное арифметическое кодирование, сжатие без потерь и точная альфа.",
     "这个页面里的每一个字节都是你的浏览器现场算出来的":
       "Каждый байт на этой странице посчитан вашим браузером прямо сейчас",
@@ -661,17 +665,18 @@
   };
 
   var ES = {
-    "MTC · 自己写的图片编解码器": "MTC · un códec de imagen escrito desde cero",
+    "，": ",",
+    "MTC · 更高效的图片编解码器": "MTC · un códec de imagen más eficiente",
+    "Rust · 同画质更小 · 无第三方编解码库": "Rust · más pequeño a igual calidad · sin códecs de terceros",
+    "靠的是": "gracias a ",
+    "更高效的": "un códec más eficiente",
+    "编解码器": "",
     "试一下": "Probar",
     "原理": "Cómo funciona",
     "数据": "Cifras",
     "安卓": "Android",
     "下载": "Descargar",
-    "Rust · 自研格式 · 无第三方编解码库": "Rust · formato propio · sin códecs de terceros",
     "把照片压小": "Fotos más pequeñas,",
-    "用的还是": "con un códec",
-    "自己写的": " propio",
-    "编解码器": "",
     "8×8 DCT、零区量化、上下文算术编码、无损与精确 alpha。": "DCT de 8×8, cuantización con zona muerta, codificación aritmética con contexto, sin pérdida y alfa exacto.",
     "这个页面里的每一个字节都是你的浏览器现场算出来的":
       "Cada byte de esta página lo está calculando tu navegador ahora mismo",
@@ -823,17 +828,18 @@
   };
 
   var FR = {
-    "MTC · 自己写的图片编解码器": "MTC · un codec d'image écrit de zéro",
+    "，": ",",
+    "MTC · 更高效的图片编解码器": "MTC · un codec d'image plus efficace",
+    "Rust · 同画质更小 · 无第三方编解码库": "Rust · plus petit à qualité égale · sans codec tiers",
+    "靠的是": "grâce à ",
+    "更高效的": "un codec plus efficace",
+    "编解码器": "",
     "试一下": "Essayer",
     "原理": "Fonctionnement",
     "数据": "Chiffres",
     "安卓": "Android",
     "下载": "Télécharger",
-    "Rust · 自研格式 · 无第三方编解码库": "Rust · format maison · sans codec tiers",
     "把照片压小": "Des photos plus petites,",
-    "用的还是": "avec un codec",
-    "自己写的": " maison",
-    "编解码器": "",
     "8×8 DCT、零区量化、上下文算术编码、无损与精确 alpha。": "DCT 8×8, quantification à zone morte, codage arithmétique contextuel, sans perte et alpha exact.",
     "这个页面里的每一个字节都是你的浏览器现场算出来的":
       "Chaque octet de cette page est calculé par votre navigateur, maintenant",
