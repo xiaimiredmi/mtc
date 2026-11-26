@@ -372,3 +372,11 @@ body.auto .drop.gone { display: none; }
   .nav nav a:not(.ghost) { display: none; }
   .bar { grid-template-columns: 110px 1fr 66px; }
 }
+/* The language button: same shape as the theme toggle, wider because "EN" needs room
+   and the label is the only hint of what it does. */
+.lang {
+  min-width: 42px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: .04em;
+}

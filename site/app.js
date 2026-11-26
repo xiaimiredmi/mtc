@@ -5,6 +5,16 @@ import { loadCodec, parseHeader, hexDump, psnr, humanBytes } from "./codec.js";
 
 const $ = (id) => document.getElementById(id);
 
+// Language: the button cycles through the languages i18n.js carries, and the choice
+// is remembered. The page starts in the browser language, not always Chinese.
+/** Translate a runtime string: the dictionary keys are the Chinese sources. */
+const t = (text) => (window.MTC_LANG ? window.MTC_LANG.str(text) : text);
+
+const langButton = $("lang");
+if (langButton && window.MTC_LANG) {
+  langButton.addEventListener("click", () => window.MTC_LANG.cycle());
+}
+
 // Surface failures in the tab title: this page has no console a visitor can open, and
 // a silent half-loaded demo is the worst possible outcome.
 window.addEventListener("error", (event) => {
@@ -135,7 +145,8 @@ function applyDownload() {
     const link = $(id);
     if (!link) continue;
     link.href = target.href;
-    link.textContent = id === "heroDl" ? target.short : target.label;
+    const label = id === "heroDl" ? target.short : target.label;
+    link.textContent = window.MTC_LANG ? window.MTC_LANG.str(label) : label;
     if (kind === "windows" || kind === "android") {
       link.setAttribute("download", "");
     }
@@ -143,7 +154,7 @@ function applyDownload() {
   const alt = $("dlAlt");
   if (alt) alt.href = LATEST;
   const note = $("osNote");
-  if (note) note.innerHTML = target.note;
+  if (note) note.innerHTML = window.MTC_LANG ? window.MTC_LANG.str(target.note) : target.note;
 }
 
 applyDownload();
@@ -180,10 +191,11 @@ const samplePrefetch = fetch("assets/sample.png").then((r) => (r.ok ? r.blob() :
 const ready = (async () => {
   try {
     state.codec = await loadCodec();
-    $("footnote").textContent =
-      `页面上的编码器是 WebAssembly（容器 v${state.codec.version}），和命令行走同一份 Rust 代码。`;
+    // The version travels with the sentence, so the translated variant drops it and the
+  // hex header above still names the container version.
+  $("footnote").textContent = t("页面上的编码器是 WebAssembly，和命令行走同一份代码。");
   } catch (err) {
-    $("stageNote").textContent = "编解码器加载失败：" + err.message;
+    $("stageNote").textContent = t("编解码器加载失败：") + err.message;
   }
 })();
 
@@ -411,7 +423,7 @@ async function run() {
     // spend that time in the background so the page never feels stuck.
     scheduleCurve();
   } catch (err) {
-    $("stageNote").textContent = "出错了：" + err.message;
+    $("stageNote").textContent = t("出错了：") + err.message;
     document.title = "MTC · 出错：" + err.message;
     console.error("run", err);
   } finally {
@@ -579,7 +591,7 @@ $("file").addEventListener("change", async (event) => {
 });
 
 $("sample").addEventListener("click", async () => {
-  $("stageNote").textContent = "载入样图…";
+  $("stageNote").textContent = t("载入样图…");
   try {
     // Never leave the button spinning: the prefetch gets three seconds, then a picture
     // drawn locally stands in. A visitor on a bad connection still sees the codec work.
@@ -601,11 +613,11 @@ $("sample").addEventListener("click", async () => {
         pixelBytes: image.data.length * 3 / 4,
       };
       $("drop").classList.add("gone");
-      $("stageNote").textContent = "样图没能在 3 秒内加载，用一张本地生成的图代替（编码器是真的）";
+      $("stageNote").textContent = t("样图没能在 3 秒内加载，用一张本地生成的图代替（编码器是真的）");
       await run();
     }
   } catch (err) {
-    $("stageNote").textContent = "样图加载失败：" + err.message;
+    $("stageNote").textContent = t("样图加载失败：") + err.message;
     document.title = "MTC · 样图加载失败：" + err.message;
     console.error("sample", err);
   }
