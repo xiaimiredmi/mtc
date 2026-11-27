@@ -5,6 +5,8 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ContentResolver;
 import android.content.ContentValues;
+import android.content.Intent;
+import android.provider.DocumentsContract;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -80,6 +82,7 @@ import java.util.Locale;
  */
 public class CameraActivity extends Activity implements ViewfinderOverlay.Listener {
     private static final int REQ_CAMERA = 1;
+    private static final int REQ_TREE = 2;
 
     private static final int[][] SIZE_CHOICES = {
             {3264 * 2448, 0},
@@ -181,6 +184,8 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
 
     /** Multi-frame state: the frames of a night or HDR shot as they arrive. */
     private Multi multi;
+    /** A folder the user picked with the system picker: the guaranteed way out. */
+    private Uri treeUri;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -206,6 +211,8 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         aspectIndex = sp.getInt("aspect", 1);
         faceBoxes = sp.getBoolean("faces", true);
         previewFit = sp.getBoolean("fit", true);
+        String saved = sp.getString("tree", null);
+        treeUri = saved == null ? null : Uri.parse(saved);
     }
 
     private void persist(String key, int value) {
@@ -1754,10 +1761,83 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         if (target != null) {
             return PUBLIC_ALBUM + "/" + name;
         }
-        return writePrivate(name, bytes) ? "私有目录（公共相册不让写）" : null;
+        return writePrivate(name, bytes)
+                ? "私有目录（相册和你选的目录都写不进去，点设置里“选保存目录”）"
+                : null;
     }
 
-    private Uri writeMedia(Uri collection, String name, String mime, byte[] bytes) {
+
+    /**
+     * Ask for a folder, once, and remember the permission.
+     *
+     * <p>MediaStore is the right way to publish a file, but a ROM is free to refuse an
+     * image whose MIME type it does not know - and `.mtc` is such a type. The system
+     * document picker has no such opinion: the user points at DCIM, the app gets a
+     * persistable grant, and writing there works whatever the ROM thinks of the format.
+     */
+    private void pickSaveFolder() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        try {
+            startActivityForResult(intent, REQ_TREE);
+        } catch (Exception e) {
+            toast("这台设备没有文件选择器");
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request != REQ_TREE || result != RESULT_OK || data == null || data.getData() == null) {
+            return;
+        }
+        Uri uri = data.getData();
+        try {
+            getContentResolver().takePersistableUriPermission(uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        } catch (Exception ignored) {
+        }
+        treeUri = uri;
+        getSharedPreferences(SP, MODE_PRIVATE).edit().putString("tree", uri.toString()).apply();
+        toast("保存目录已设置");
+    }
+
+    /** Write into the picked folder, creating an MTC subfolder the first time. */
+    private String writeToPickedFolder(String name, byte[] bytes) {
+        if (treeUri == null) {
+            return null;
+        }
+        ContentResolver resolver = getContentResolver();
+        try {
+            String treeId = DocumentsContract.getTreeDocumentId(treeUri);
+            Uri root = DocumentsContract.buildDocumentUriUsingTree(treeUri, treeId);
+            Uri dir = DocumentsContract.createDocument(resolver, root,
+                    DocumentsContract.Document.MIME_TYPE_DIR, "MTC");
+            if (dir == null) {
+                dir = root;
+            }
+            Uri file = DocumentsContract.createDocument(resolver, dir,
+                    "application/octet-stream", name);
+            if (file == null) {
+                return null;
+            }
+            OutputStream out = resolver.openOutputStream(file);
+            if (out == null) {
+                return null;
+            }
+            try {
+                out.write(bytes);
+            } finally {
+                out.close();
+            }
+            return file.toString();
+        } catch (Exception e) {
+            return null;
+        }
+    }    private Uri writeMedia(Uri collection, String name, String mime, byte[] bytes) {
         if (Build.VERSION.SDK_INT < 29) {
             return null;
         }
@@ -2029,6 +2109,7 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         final TextView range = row(sheet);
         final TextView fitRow = row(sheet);
         final TextView faceRow = row(sheet);
+        final TextView folderRow = row(sheet);
         final TextView diagnostics = new TextView(this);
         diagnostics.setTextSize(11.5f);
         diagnostics.setTextColor(0xFF666670);
@@ -2045,6 +2126,9 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
                         : "方向：固定 " + rotationOverride + "°");
                 range.setText(fullRange ? "色彩范围：全 (0-255)" : "色彩范围：有限 (16-235)");
                 fitRow.setText(previewFit ? "取景：完整（不裁切）" : "取景：填满屏幕（会裁切边缘）");
+                folderRow.setText(treeUri == null
+                        ? "保存目录：DCIM/MTC（点一下自己选）"
+                        : "保存目录：已选（点一下换）");
                 faceRow.setText(faceMode == null
                         ? "人脸框：这台相机不支持"
                         : (faceBoxes ? "人脸框：开" : "人脸框：关"));
@@ -2114,6 +2198,13 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
                 fullRange = !fullRange;
                 persist("fullRange", fullRange);
                 refresh.run();
+            }
+        });
+
+        folderRow.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                pickSaveFolder();
             }
         });
 
