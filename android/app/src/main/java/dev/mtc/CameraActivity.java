@@ -116,6 +116,8 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
     private Surface previewSurface;
     private volatile int framesSeen;
     private boolean safeMode;
+    /** 0 normal, 1 safe, 2 the minimal request a camera can be given. */
+    private int stage;
     /** null when the camera has no face detection; the mode to request otherwise. */
     private Integer faceMode;
     private boolean faceBoxes = true;
@@ -1056,6 +1058,16 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
     private CaptureRequest.Builder baseRequest(int template, Surface target)
             throws CameraAccessException {
         CaptureRequest.Builder builder = device.createCaptureRequest(template);
+        if (stage >= 2) {
+            // One target and "do what you think best"; face detection, metering regions, a
+            // crop rectangle and flash behaviour are all gone on purpose. If the viewfinder
+            // is still black here, none of those were the reason.
+            if (target != null) {
+                builder.addTarget(target);
+            }
+            builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO);
+            return builder;
+        }
         if (target != null) {
             builder.addTarget(target);
         }
@@ -1195,21 +1207,40 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
                 if (framesSeen > 0 || device == null) {
                     return;
                 }
-                if (!safeMode) {
+                if (stage == 0) {
+                    stage = 1;
                     safeMode = true;
                     toast("取景没有画面，切到安全模式重试");
                     closeCamera();
                     openCamera();
+                } else if (stage == 1) {
+                    stage = 2;
+                    toast("安全模式也没有画面，改发最小请求");
+                    closeCamera();
+                    openCamera();
                 } else {
                     showDiagnostics();
-                    toast("安全模式也没有画面，屏幕上那一行是原因");
+                    toast("最小请求也没有画面，屏幕上那一行就是原因");
                 }
             }
         }, 2500);
     }
 
     /** A line of numbers over the viewfinder, for when a picture is not arriving. */
-    private void showDiagnostics() {
+
+    /** Which build is running, and when it was installed: without this a bug report cannot
+     * tell a new APK from the one before it. */
+    private String buildStamp() {
+        try {
+            android.content.pm.PackageInfo info = getPackageManager()
+                    .getPackageInfo(getPackageName(), 0);
+            String when = new SimpleDateFormat("MM-dd HH:mm", Locale.US)
+                    .format(new Date(info.lastUpdateTime));
+            return info.versionName + " · " + when;
+        } catch (Exception e) {
+            return "?";
+        }
+    }    private void showDiagnostics() {
         if (diagnostics == null) {
             diagnostics = new TextView(this);
             diagnostics.setTextSize(10.5f);
@@ -1224,7 +1255,7 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
         }
         diagnostics.setVisibility(View.VISIBLE);
         diagnostics.setText(String.format(Locale.US,
-                "设备 %s · 会话 %s · 面 %s · 帧 %d · 预览 %dx%d · 拍照 %dx%d · 传感器 %d° → %d° · 安全 %s",
+                "版本 %s · 设备 %s · 会话 %s · 面 %s · 帧 %d · 预览 %dx%d · 拍照 %dx%d · 传感器 %d° → %d° · 安全 %s",
                 device != null ? "有" : "无",
                 session != null ? "有" : "无",
                 previewSurface != null ? "有" : "无",
@@ -2136,7 +2167,7 @@ public class CameraActivity extends Activity implements ViewfinderOverlay.Listen
                         "拍照 %d×%d · 预览 %d×%d · 传感器 %d° 转 %d°\n闪光 %s · 画幅 %s · 定时 %d s\n照片 → %s，视频 → %s",
                         stillSize.getWidth(), stillSize.getHeight(),
                         previewSize.getWidth(), previewSize.getHeight(),
-                        sensorOrientation, stillRotation(), FLASH_LABELS[flashMode],
+                        sensorOrientation, stillRotation(), buildStamp(), FLASH_LABELS[flashMode],
                         ASPECT_LABELS[aspectIndex], timerSeconds, PUBLIC_ALBUM, PUBLIC_VIDEO));
             }
         };
