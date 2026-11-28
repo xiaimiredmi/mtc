@@ -24,6 +24,12 @@ use mtc::imgio;
 const BG: egui::Color32 = egui::Color32::WHITE;
 /// Highest zoom the wheel may reach.
 const MAX_ZOOM: f32 = 8.0;
+/// Zooming out is allowed below fit, down to this fraction of it. Fit was the floor, which
+/// meant a picture that opened at fit could only ever get bigger - there was no way back
+/// out to see the whole thing with room around it.
+const FIT_FLOOR: f32 = 0.25;
+/// ...but never below this absolute scale.
+const MIN_ZOOM: f32 = 0.02;
 
 // ---------------------------------------------------------------- geometry --
 
@@ -57,6 +63,11 @@ impl Geometry {
         (cw / self.img_w).min(ch / self.img_h)
     }
 
+    /// The smallest scale the wheel may reach.
+    fn zoom_floor(&self) -> f32 {
+        (self.fit_scale() * FIT_FLOOR).max(MIN_ZOOM)
+    }
+
     fn size(&self) -> egui::Vec2 {
         egui::vec2(self.img_w * self.scale, self.img_h * self.scale)
     }
@@ -88,7 +99,7 @@ impl Geometry {
         self.canvas = size;
         match initial_zoom {
             Some(z) if first => {
-                self.scale = z.clamp(self.fit_scale(), MAX_ZOOM);
+                self.scale = z.clamp(self.zoom_floor(), MAX_ZOOM);
                 self.fit_mode = false;
                 self.clamp_pan();
             }
@@ -96,7 +107,8 @@ impl Geometry {
                 if self.fit_mode || first {
                     self.fit();
                 } else {
-                    self.scale = self.scale.max(self.fit_scale());
+                    // Only clamp: resizing the window must not undo a deliberate zoom.
+                    self.scale = self.scale.clamp(self.zoom_floor(), MAX_ZOOM);
                     self.clamp_pan();
                 }
             }
@@ -104,10 +116,13 @@ impl Geometry {
     }
 
     /// Multiply the zoom by `factor`, keeping whatever sits under `pointer`
-    /// where it is. The zoom never goes below fit or above [`MAX_ZOOM`].
+    /// where it is. The zoom never goes below [`FIT_FLOOR`] of fit, nor above
+    /// [`MAX_ZOOM`] (or above fit, for a picture too small to fill the window).
     fn zoom_at(&mut self, pointer: egui::Vec2, factor: f32) {
-        let lo = self.fit_scale();
-        let hi = MAX_ZOOM.max(lo);
+        let lo = self.zoom_floor();
+        // The ceiling is relative to fit, not to the floor: a picture too small to fill the
+        // window is already larger than MAX_ZOOM at fit, and zooming in must not shrink it.
+        let hi = MAX_ZOOM.max(self.fit_scale());
         let old = if self.scale > 0.0 { self.scale } else { lo };
         let new = (old * factor).clamp(lo, hi);
         if (new - old).abs() <= 1e-6 {
@@ -253,6 +268,55 @@ struct MtView {
     closed: bool,
 }
 
+/// A copy of `image` no larger than `max_side`, averaged down.
+///
+/// Placed here rather than in a texture path because the whole point is to keep the upload
+/// small; the average (not a nearest pick) is what keeps a downscaled photo from buzzing.
+fn downscaled(image: &egui::ColorImage, max_side: usize) -> egui::ColorImage {
+    let (w, h) = (image.size[0], image.size[1]);
+    let long = w.max(h);
+    if long <= max_side || max_side == 0 {
+        return image.clone();
+    }
+    let factor = (long + max_side - 1) / max_side;
+    let (nw, nh) = (w.div_ceil(factor), h.div_ceil(factor));
+    let mut pixels = Vec::with_capacity(nw * nh);
+    for y in 0..nh {
+        for x in 0..nw {
+            let (mut r, mut g, mut b, mut a, mut n) = (0u32, 0u32, 0u32, 0u32, 0u32);
+            for dy in 0..factor {
+                let sy = y * factor + dy;
+                if sy >= h {
+                    break;
+                }
+                for dx in 0..factor {
+                    let sx = x * factor + dx;
+                    if sx >= w {
+                        break;
+                    }
+                    let c = image.pixels[sy * w + sx];
+                    r += c.r() as u32;
+                    g += c.g() as u32;
+                    b += c.b() as u32;
+                    a += c.a() as u32;
+                    n += 1;
+                }
+            }
+            let n = n.max(1);
+            pixels.push(egui::Color32::from_rgba_unmultiplied(
+                (r / n) as u8,
+                (g / n) as u8,
+                (b / n) as u8,
+                (a / n) as u8,
+            ));
+        }
+    }
+    egui::ColorImage {
+        size: [nw, nh],
+        pixels,
+    }
+}
+
 impl MtView {
     fn new(cc: &eframe::CreationContext<'_>, shot: Shot) -> MtView {
         cc.egui_ctx.set_visuals(egui::Visuals::light());
@@ -291,8 +355,14 @@ impl MtView {
         } else {
             egui::TextureOptions::LINEAR
         };
+        // A 12 MP picture is a 48 MB texture upload, and switching filter at 1.5x used to
+        // repeat it every time - which is what made dragging and zooming feel heavy. The
+        // texture is capped: 2048 is plenty when the picture is being shown smaller than
+        // it, and 4096 when it is being inspected pixel by pixel.
+        let budget = if nearest { 4096 } else { 2048 };
+        let source = downscaled(&self.shot.pixels, budget);
         self.nearest = nearest;
-        self.texture = Some(ctx.load_texture("picture", self.shot.pixels.clone(), options));
+        self.texture = Some(ctx.load_texture("picture", source, options));
     }
 }
 
@@ -381,14 +451,16 @@ fn main() -> std::process::ExitCode {
     };
     let title = shot.title.clone();
     let (w, h) = (shot.width, shot.height);
+    // Smaller than it was: a viewer that covers most of the screen to show one picture is
+    // in the way, and a smaller window is also cheaper to composit.
     let inner = egui::vec2(
-        (w as f32 + 80.0).clamp(480.0, 1600.0),
-        (h as f32 + 150.0).clamp(360.0, 1000.0),
+        (w as f32 + 24.0).clamp(420.0, 1180.0),
+        (h as f32 + 40.0).clamp(320.0, 820.0),
     );
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([inner.x, inner.y])
-            .with_min_inner_size([480.0, 360.0])
+            .with_min_inner_size([380.0, 300.0])
             .with_title(title),
         ..Default::default()
     };
@@ -426,14 +498,25 @@ mod tests {
     }
 
     #[test]
-    fn zoom_stops_at_fit_on_the_way_out() {
+    fn zoom_can_go_below_fit_down_to_the_floor() {
         let mut g = geom(512, 512, egui::vec2(1024.0, 768.0));
         let fit = g.scale;
-        for _ in 0..20 {
+        for _ in 0..40 {
             g.zoom_at(egui::vec2(500.0, 400.0), 0.8);
         }
-        assert!((g.scale - fit).abs() < 1e-6, "scale {} fit {}", g.scale, fit);
-        assert!(g.fit_mode);
+        let floor = (fit * FIT_FLOOR).max(MIN_ZOOM);
+        assert!((g.scale - floor).abs() < 1e-6, "scale {} floor {}", g.scale, floor);
+        // Shrinking is a deliberate act, not fit mode: the label must say a percentage.
+        assert!(!g.fit_mode);
+    }
+
+    #[test]
+    fn a_window_resize_does_not_undo_a_zoom() {
+        let mut g = geom(512, 512, egui::vec2(1024.0, 768.0));
+        g.zoom_at(egui::vec2(500.0, 400.0), 0.5);
+        let zoomed = g.scale;
+        g.set_canvas(egui::vec2(700.0, 500.0), None);
+        assert!((g.scale - zoomed).abs() < 1e-6, "{} -> {}", zoomed, g.scale);
     }
 
     #[test]
