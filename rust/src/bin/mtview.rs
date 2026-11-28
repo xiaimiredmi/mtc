@@ -435,13 +435,152 @@ impl eframe::App for MtView {
     }
 }
 
+
+/// Ask Windows for a file, the way the shortcut needs it.
+///
+/// <p>Declared by hand rather than pulled in from a crate: the dialog is one function and
+/// one struct, the build has to work offline, and a dependency that exists only to show an
+/// open dialog is not worth the download.
+#[cfg(windows)]
+mod picker {
+    use std::ffi::c_void;
+    use std::path::PathBuf;
+    use std::ptr;
+
+    #[repr(C)]
+    struct OpenFileNameW {
+        l_struct_size: u32,
+        hwnd_owner: *mut c_void,
+        h_instance: *mut c_void,
+        lpstr_filter: *const u16,
+        lpstr_custom_filter: *const u16,
+        n_max_cust_filter: u32,
+        n_filter_index: u32,
+        lpstr_file: *mut u16,
+        n_max_file: u32,
+        lpstr_file_title: *const u16,
+        n_max_file_title: u32,
+        lpstr_initial_dir: *const u16,
+        lpstr_title: *const u16,
+        flags: u32,
+        n_file_offset: u16,
+        n_file_extension: u16,
+        lpstr_def_ext: *const u16,
+        lpstr_custom_data: *const u16,
+        lpfn_hook: *mut c_void,
+        lp_template_name: *const u16,
+        pv_reserved: *mut c_void,
+        dw_reserved: u32,
+        flags_ex: u32,
+    }
+
+    #[link(name = "comdlg32")]
+    extern "system" {
+        fn GetOpenFileNameW(ofn: *mut OpenFileNameW) -> i32;
+    }
+
+    const OFN_FILEMUSTEXIST: u32 = 0x0000_1000;
+    const OFN_PATHMUSTEXIST: u32 = 0x0000_0800;
+    const OFN_EXPLORER: u32 = 0x0008_0000;
+    const OFN_NOCHANGEDIR: u32 = 0x0000_0008;
+
+    fn wide(text: &str) -> Vec<u16> {
+        text.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    /// The chosen path, or `None` when the dialog is cancelled.
+    pub fn ask() -> Option<PathBuf> {
+        // "MTC pictures\0*.mtc\0All files\0*.*\0\0"
+        let filter: Vec<u16> = "MTC 图片 (*.mtc)"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .chain("*.mtc".encode_utf16())
+            .chain(std::iter::once(0))
+            .chain("所有文件 (*.*)".encode_utf16())
+            .chain(std::iter::once(0))
+            .chain("*.*".encode_utf16())
+            .chain(std::iter::once(0))
+            .chain(std::iter::once(0))
+            .collect();
+        let title = wide("打开 MTC 图片");
+        // Start where pictures actually are, instead of wherever the last dialog was left.
+        let pictures = std::env::var_os("USERPROFILE")
+            .map(|home| std::path::PathBuf::from(home).join("Pictures"))
+            .filter(|dir| dir.is_dir());
+        let initial = pictures
+            .as_ref()
+            .map(|dir| wide(&dir.to_string_lossy()))
+            .unwrap_or_else(|| wide(""));
+        let mut buffer = vec![0u16; 1024];
+
+        let mut ofn = OpenFileNameW {
+            l_struct_size: std::mem::size_of::<OpenFileNameW>() as u32,
+            hwnd_owner: ptr::null_mut(),
+            h_instance: ptr::null_mut(),
+            lpstr_filter: filter.as_ptr(),
+            lpstr_custom_filter: ptr::null(),
+            n_max_cust_filter: 0,
+            n_filter_index: 1,
+            lpstr_file: buffer.as_mut_ptr(),
+            n_max_file: buffer.len() as u32,
+            lpstr_file_title: ptr::null(),
+            n_max_file_title: 0,
+            lpstr_initial_dir: if pictures.is_some() { initial.as_ptr() } else { ptr::null() },
+            lpstr_title: title.as_ptr(),
+            flags: OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER | OFN_NOCHANGEDIR,
+            n_file_offset: 0,
+            n_file_extension: 0,
+            lpstr_def_ext: ptr::null(),
+            lpstr_custom_data: ptr::null(),
+            lpfn_hook: ptr::null_mut(),
+            lp_template_name: ptr::null(),
+            pv_reserved: ptr::null_mut(),
+            dw_reserved: 0,
+            flags_ex: 0,
+        };
+
+        // SAFETY: `ofn` points at every buffer it references for the whole call, and the
+        // struct size is reported exactly as the API requires.
+        let ok = unsafe { GetOpenFileNameW(&mut ofn) };
+        if ok == 0 {
+            return None;
+        }
+        let end = buffer.iter().position(|c| *c == 0).unwrap_or(buffer.len());
+        let path = String::from_utf16_lossy(&buffer[..end]);
+        if path.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(path))
+        }
+    }
+}
+
+#[cfg(not(windows))]
+mod picker {
+    use std::path::PathBuf;
+
+    pub fn ask() -> Option<PathBuf> {
+        None
+    }
+}
+
 fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.is_empty() {
-        eprintln!("usage: mtview <file.mtc|image.png>");
-        return std::process::ExitCode::from(2);
-    }
-    let path = args[0].clone();
+    // No argument is what a shortcut does, and what a double-click on the shortcut means:
+    // ask for a file. A viewer that only works when something is dragged onto it is not
+    // much of a viewer.
+    let path = if args.is_empty() {
+        match picker::ask() {
+            Some(chosen) => chosen.to_string_lossy().into_owned(),
+            None => {
+                // Cancelled, or no dialog on this platform: say how to use it and leave.
+                eprintln!("usage: mtview <file.mtc|image.png>");
+                return std::process::ExitCode::from(0);
+            }
+        }
+    } else {
+        args[0].clone()
+    };
     let shot = match load(&path) {
         Ok(v) => v,
         Err(e) => {

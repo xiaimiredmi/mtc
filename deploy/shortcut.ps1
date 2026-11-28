@@ -20,7 +20,7 @@ $icon = if (Test-Path $iconFile) { "$iconFile,0" } else { "$viewer,0" }
 
 # MTC + picture + viewer
 $name = 'MTC ' + [char]0x56FE + [char]0x7247 + [char]0x67E5 + [char]0x770B + [char]0x5668
-$description = 'MTC ' + [char]0x56FE + [char]0x7247 + [char]0x67E5 + [char]0x770B + [char]0x5668
+$description = 'MTC ' + [char]0x56FE + [char]0x7247 + [char]0x67E5 + [char]0x770B + [char]0x5668 + ' - ' + [char]0x9009 + [char]0x62E9 + [char]0x4E00 + [char]0x5F20 + [char]0x56FE + [char]0x7247
 
 $places = @([Environment]::GetFolderPath('Desktop'))
 $programs = [Environment]::GetFolderPath('Programs')
